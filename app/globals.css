@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+/*
+ * Albion-inspired dark parchment theme. Colors are defined once as tokens and the
+ * whole UI reads from them, so contrast stays consistent across every surface.
+ */
+:root {
+  --background: #10100e;
+  --surface: #1a1a17;
+  --surface-raised: #232320;
+  --border: #34342e;
+  --foreground: #ece7dc;
+  --muted: #a29c8d;
+  --gold: #d8b45a;
+  --gold-dim: #8c7333;
+  --danger: #e07a5f;
+  --warn: #e6b25c;
+  --ok: #7fb069;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border-soft: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-gold: var(--gold);
+  --color-gold-dim: var(--gold-dim);
+  --color-danger: var(--danger);
+  --color-warn: var(--warn);
+  --color-ok: var(--ok);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background:
+    radial-gradient(120% 80% at 50% 0%, #1c1b16 0%, var(--background) 60%);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Mobile requirement: never let a wide table push the page sideways (PRD §17). */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
