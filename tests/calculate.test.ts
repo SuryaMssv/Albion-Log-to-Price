@@ -68,6 +68,9 @@ describe("validateInput", () => {
       city: "Martlock",
       priceBasis: "sell_mid",
       participants: 5,
+      repairCost: 0,
+      sellerTaxPercent: 0,
+      marketTaxPercent: 0,
     });
   });
 
@@ -110,6 +113,35 @@ describe("validateInput", () => {
     });
     expect(input.participantNames).toEqual(["a".repeat(40), "Bo"]);
   });
+
+  it("accepts repair cost and tax percentages, defaulting them to zero", () => {
+    expect(validateInput({ log: "x", participants: 5, city: "Martlock" }).repairCost).toBe(0);
+    const input = validateInput({
+      log: "x",
+      participants: 5,
+      city: "Martlock",
+      repair_cost: 300_000,
+      seller_tax: 4,
+      market_tax: 2.5,
+    });
+    expect(input).toMatchObject({
+      repairCost: 300_000,
+      sellerTaxPercent: 4,
+      marketTaxPercent: 2.5,
+    });
+  });
+
+  it("rejects negative or oversized deductions", () => {
+    expect(() =>
+      validateInput({ log: "x", participants: 5, city: "Martlock", repair_cost: -1 }),
+    ).toThrow(/Repair cost/);
+    expect(() =>
+      validateInput({ log: "x", participants: 5, city: "Martlock", seller_tax: 101 }),
+    ).toThrow(/Seller's tax/);
+    expect(() =>
+      validateInput({ log: "x", participants: 5, city: "Martlock", market_tax: -0.1 }),
+    ).toThrow(/Market tax/);
+  });
 });
 
 describe("calculateLootSplit", () => {
@@ -138,6 +170,28 @@ describe("calculateLootSplit", () => {
     // Unknown name is unresolved; the shoes exist nowhere, so they await a manual price.
     expect(result.unresolvedItems.map((item) => item.name)).toEqual(["Adept's Unknown Item"]);
     expect(result.missingPrices.map((item) => item.itemId)).toEqual(["T4_SHOES_LEATHER_HELL@2"]);
+  });
+
+  it("splits net after repair and selling fees", async () => {
+    const result = await calculateLootSplit(
+      {
+        log: SAMPLE,
+        server: "east",
+        city: "Caerleon",
+        priceBasis: "sell_min",
+        participants: 5,
+        repairCost: 300_000,
+        sellerTaxPercent: 4,
+        marketTaxPercent: 2.5,
+      },
+      fakeMarket,
+    );
+
+    expect(result.totalValue).toBe(1_024_000);
+    expect(result.sellerFee).toBe(40_960);
+    expect(result.marketFee).toBe(25_600);
+    expect(result.netValue).toBe(657_440);
+    expect(result.share).toBe(131_488);
   });
 
   it("walks the fallback chain in order: city, then other markets, then sales", async () => {

@@ -34,6 +34,12 @@ function missing(itemId: string, amount: number): MissingPriceItem {
 function result(overrides: Partial<CalculationResult> = {}): CalculationResult {
   return {
     totalValue: 100_000,
+    netValue: 100_000,
+    repairCost: 0,
+    sellerTaxPercent: 0,
+    marketTaxPercent: 0,
+    sellerFee: 0,
+    marketFee: 0,
     participants: 5,
     share: 20_000,
     remainder: 0,

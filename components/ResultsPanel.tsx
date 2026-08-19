@@ -3,14 +3,16 @@
 import { useMemo, useState } from "react";
 import ItemTable from "./ItemTable";
 import IssuesPanel from "./IssuesPanel";
+import { applyDeductions, type DeductionsInput } from "@/lib/deductions";
 import { applyManualPrices } from "@/lib/overrides";
 import { buildDiscordMessage } from "@/lib/discord";
 import { buildCsv } from "@/lib/csv";
-import { formatCompact, formatSilver } from "@/lib/format";
+import { formatCompact, formatPercent, formatSilver } from "@/lib/format";
 import { PRICE_BASES, SERVERS, type CalculationResult } from "@/lib/types";
 
 interface ResultsPanelProps {
   result: CalculationResult;
+  deductions: DeductionsInput;
   onRetryPrices: () => void;
   busy: boolean;
 }
@@ -27,14 +29,18 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 
 export default function ResultsPanel({
   result: rawResult,
+  deductions,
   onRetryPrices,
   busy,
 }: ResultsPanelProps) {
   const [copied, setCopied] = useState(false);
   const [overrides, setOverrides] = useState<Record<string, number>>({});
 
-  // Manual prices are folded in client-side: the total, split and exports all follow.
-  const result = useMemo(() => applyManualPrices(rawResult, overrides), [rawResult, overrides]);
+  // Manual prices then deductions: both are pure, so tax/repair edits do not refetch.
+  const result = useMemo(
+    () => applyDeductions(applyManualPrices(rawResult, overrides), deductions),
+    [rawResult, overrides, deductions],
+  );
 
   function updateOverride(key: string, value: number | null) {
     setOverrides((previous) => {
@@ -89,11 +95,15 @@ export default function ResultsPanel({
 
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <StatCard
-            label="💰 Total Market Value"
+            label="💰 Gross Market Value"
             value={`${formatSilver(result.totalValue)}`}
             sub={`${formatCompact(result.totalValue)} silver across ${result.stats.itemsPriced} item stacks in ${result.city}`}
           />
-          <StatCard label="👥 Participants" value={String(result.participants)} />
+          <StatCard
+            label="💰 Net Distributable"
+            value={`${formatSilver(result.netValue)}`}
+            sub={netBreakdown(result)}
+          />
           <StatCard
             label="🪙 Each Player"
             value={`${formatSilver(result.share)}`}
@@ -166,8 +176,22 @@ export default function ResultsPanel({
       />
 
       <p className="text-xs text-muted">
-        Gross market value — market tax, listing fees and repair costs are not deducted.
+        Net is gross minus repair cost, seller&apos;s tax and market tax. Leave taxes at 0% when
+        the loot is not being sold.
       </p>
     </div>
   );
+}
+
+function netBreakdown(result: CalculationResult): string {
+  const parts: string[] = [];
+  if (result.repairCost > 0) parts.push(`−${formatSilver(result.repairCost)} repair`);
+  if (result.sellerFee > 0) {
+    parts.push(`−${formatPercent(result.sellerTaxPercent)}% seller (${formatSilver(result.sellerFee)})`);
+  }
+  if (result.marketFee > 0) {
+    parts.push(`−${formatPercent(result.marketTaxPercent)}% market (${formatSilver(result.marketFee)})`);
+  }
+  if (parts.length === 0) return "No repair or selling fees";
+  return parts.join(" · ");
 }

@@ -160,7 +160,17 @@ export interface ParticipantShare {
 }
 
 export interface CalculationResult {
+  /** Gross market value of priced stacks. Item rows always sum to this. */
   totalValue: number;
+  /** Gross minus repair and selling fees — this is what is split. */
+  netValue: number;
+  repairCost: number;
+  sellerTaxPercent: number;
+  marketTaxPercent: number;
+  /** Whole silver taken as seller's tax (percent of gross). */
+  sellerFee: number;
+  /** Whole silver taken as market tax (percent of gross). */
+  marketFee: number;
   participants: number;
   share: number;
   /** Silver left over when the total does not divide evenly (PRD §14). */

@@ -8,6 +8,7 @@ export default function Home() {
         <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
           ⚔️ Albion Guild Loot Calculator
         </h1>
+        <p className="mt-1 text-sm text-gold">by suryamssv</p>
         <p className="mt-2 max-w-2xl text-sm text-muted">
           Paste a guild chest log, value every stack at current market prices, and split the total
           evenly between the players who ran it. Nothing is stored — logs are processed and discarded.
@@ -33,6 +34,7 @@ export default function Home() {
           Item metadata: {itemIndexMeta.names.toLocaleString()} names from the official binary dumps
           (built {itemIndexMeta.generatedAt.slice(0, 10)}).
         </p>
+        <p className="mt-4 text-muted">© {new Date().getFullYear()} suryamssv. All rights reserved.</p>
       </footer>
     </main>
   );

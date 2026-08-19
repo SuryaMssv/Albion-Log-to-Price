@@ -1,4 +1,5 @@
-import { formatSilver } from "./format";
+import { hasDeductions } from "./deductions";
+import { formatPercent, formatSilver } from "./format";
 import { PRICE_BASES, SERVERS, type CalculationResult } from "./types";
 
 /**
@@ -7,13 +8,32 @@ import { PRICE_BASES, SERVERS, type CalculationResult } from "./types";
  * is never quietly wrong.
  */
 export function buildDiscordMessage(result: CalculationResult): string {
-  const lines: string[] = [
-    "⚔️ **GANK LOOT SPLIT**",
-    "",
-    `💰 Total Value: **${formatSilver(result.totalValue)}**`,
+  const lines: string[] = ["⚔️ **GANK LOOT SPLIT**", ""];
+
+  if (hasDeductions(result)) {
+    lines.push(`💰 Gross Value: **${formatSilver(result.totalValue)}**`);
+    if (result.repairCost > 0) {
+      lines.push(`🔧 Repair: −${formatSilver(result.repairCost)}`);
+    }
+    if (result.sellerFee > 0) {
+      lines.push(
+        `📉 Seller's tax (${formatPercent(result.sellerTaxPercent)}%): −${formatSilver(result.sellerFee)}`,
+      );
+    }
+    if (result.marketFee > 0) {
+      lines.push(
+        `📉 Market tax (${formatPercent(result.marketTaxPercent)}%): −${formatSilver(result.marketFee)}`,
+      );
+    }
+    lines.push(`💰 Net Value: **${formatSilver(result.netValue)}**`);
+  } else {
+    lines.push(`💰 Total Value: **${formatSilver(result.totalValue)}**`);
+  }
+
+  lines.push(
     `👥 Participants: **${result.participants}**`,
     `🪙 Each: **${formatSilver(result.share)}**`,
-  ];
+  );
 
   if (result.remainder > 0) {
     lines.push(`↩️ Remainder: ${formatSilver(result.remainder)} silver`);

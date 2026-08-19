@@ -1,4 +1,5 @@
 import { computeSplit, buildParticipantShares, itemValue } from "./calculator";
+import { applyDeductions } from "./deductions";
 import type { CalculationResult, MissingPriceItem, PricedItem } from "./types";
 
 /** Overrides are keyed the same way market quotes are: `${itemId}|${quality}`. */
@@ -76,18 +77,26 @@ export function applyManualPrices(
   const totalValue = items.reduce((sum, item) => sum + item.totalValue, 0);
   const { share, remainder } = computeSplit(totalValue, result.participants);
 
-  return {
-    ...result,
-    items,
-    missingPrices: stillMissing,
-    totalValue,
-    share,
-    remainder,
-    participantShares: buildParticipantShares(
-      result.participants,
+  return applyDeductions(
+    {
+      ...result,
+      items,
+      missingPrices: stillMissing,
+      totalValue,
+      netValue: totalValue,
       share,
-      result.participantShares.map((participant) => participant.name),
-    ),
-    stats: { ...result.stats, itemsPriced: items.length },
-  };
+      remainder,
+      participantShares: buildParticipantShares(
+        result.participants,
+        share,
+        result.participantShares.map((participant) => participant.name),
+      ),
+      stats: { ...result.stats, itemsPriced: items.length },
+    },
+    {
+      repairCost: result.repairCost,
+      sellerTaxPercent: result.sellerTaxPercent,
+      marketTaxPercent: result.marketTaxPercent,
+    },
+  );
 }

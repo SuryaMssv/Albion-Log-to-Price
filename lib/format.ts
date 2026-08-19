@@ -33,3 +33,8 @@ export function formatAge(isoDate: string, now: number = Date.now()): string {
 export function enchantmentLabel(enchantment: number): string {
   return enchantment > 0 ? `.${enchantment}` : "-";
 }
+
+/** 4 -> "4", 2.5 -> "2.5" */
+export function formatPercent(value: number): string {
+  return Number.parseFloat(value.toPrecision(12)).toString();
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import LogInput from "./LogInput";
 import ResultsPanel from "./ResultsPanel";
 import {
@@ -14,6 +14,33 @@ import {
 } from "@/lib/types";
 
 const MAX_PARTICIPANTS = 100;
+const MAX_REPAIR_COST = 1_000_000_000_000;
+const MAX_TAX_PERCENT = 100;
+
+function parseSilverField(raw: string): number {
+  if (raw.trim() === "") return 0;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.min(MAX_REPAIR_COST, Math.trunc(value));
+}
+
+function parsePercentField(raw: string): number {
+  if (raw.trim() === "" || raw === ".") return 0;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.min(MAX_TAX_PERCENT, value);
+}
+
+function isSilverDraft(raw: string): boolean {
+  return raw === "" || /^\d+$/.test(raw);
+}
+
+function isPercentDraft(raw: string): boolean {
+  if (raw === "" || raw === ".") return true;
+  if (!/^\d{0,3}(\.\d{0,4})?$/.test(raw)) return false;
+  const value = Number(raw);
+  return Number.isFinite(value) && value <= MAX_TAX_PERCENT;
+}
 
 export default function LootCalculator() {
   const [log, setLog] = useState("");
@@ -21,12 +48,24 @@ export default function LootCalculator() {
   const [city, setCity] = useState<City | "">("");
   const [priceBasis, setPriceBasis] = useState<PriceBasis>("sell_mid");
   const [participants, setParticipants] = useState(5);
+  const [repairCost, setRepairCost] = useState("");
+  const [sellerTax, setSellerTax] = useState("");
+  const [marketTax, setMarketTax] = useState("");
   const [useNames, setUseNames] = useState(false);
   const [names, setNames] = useState<string[]>([]);
   const [result, setResult] = useState<CalculationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const resultsRef = useRef<HTMLDivElement>(null);
+
+  const deductions = useMemo(
+    () => ({
+      repairCost: parseSilverField(repairCost),
+      sellerTaxPercent: parsePercentField(sellerTax),
+      marketTaxPercent: parsePercentField(marketTax),
+    }),
+    [repairCost, sellerTax, marketTax],
+  );
 
   const calculate = useCallback(async () => {
     if (log.trim() === "") {
@@ -49,6 +88,9 @@ export default function LootCalculator() {
           city,
           price_basis: priceBasis,
           participants,
+          repair_cost: deductions.repairCost,
+          seller_tax: deductions.sellerTaxPercent,
+          market_tax: deductions.marketTaxPercent,
           participant_names: useNames ? names.slice(0, participants) : [],
         }),
       });
@@ -68,13 +110,16 @@ export default function LootCalculator() {
     } finally {
       setBusy(false);
     }
-  }, [log, server, city, priceBasis, participants, useNames, names]);
+  }, [log, server, city, priceBasis, participants, deductions, useNames, names]);
 
   function clearAll() {
     setLog("");
     setResult(null);
     setError(null);
     setNames([]);
+    setRepairCost("");
+    setSellerTax("");
+    setMarketTax("");
   }
 
   function updateName(index: number, value: string) {
@@ -162,6 +207,70 @@ export default function LootCalculator() {
           </label>
         </div>
 
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-muted">Repair cost</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="0"
+              value={repairCost}
+              onChange={(event) => {
+                const raw = event.target.value.replace(/,/g, "").replace(/^0+(?=\d)/, "");
+                if (isSilverDraft(raw) && parseSilverField(raw) <= MAX_REPAIR_COST) {
+                  setRepairCost(raw);
+                }
+              }}
+              className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-3 tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-muted">Seller&apos;s tax</span>
+            <div className="relative">
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0"
+                value={sellerTax}
+                onChange={(event) => {
+                  const raw = event.target.value.replace(/^0+(?=\d)/, "");
+                  if (isPercentDraft(raw)) setSellerTax(raw);
+                }}
+                className="min-h-11 w-full rounded-lg border border-border-soft bg-surface-raised px-3 pr-8 tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40"
+              />
+              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted">
+                %
+              </span>
+            </div>
+          </label>
+
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-muted">Market tax</span>
+            <div className="relative">
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0"
+                value={marketTax}
+                onChange={(event) => {
+                  const raw = event.target.value.replace(/^0+(?=\d)/, "");
+                  if (isPercentDraft(raw)) setMarketTax(raw);
+                }}
+                className="min-h-11 w-full rounded-lg border border-border-soft bg-surface-raised px-3 pr-8 tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40"
+              />
+              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted">
+                %
+              </span>
+            </div>
+          </label>
+        </div>
+
+        <p className="mt-2 text-xs text-muted">
+          Repair is silver. Seller&apos;s tax and market tax are percentages of gross loot — leave
+          them at 0% when the loot is not being sold.
+        </p>
+
         <p className="mt-2 text-xs text-muted">
           {PRICE_BASES[priceBasis].hint} Where the basis has no data the other sources fill in,
           labelled per row; anything still unpriced can be entered by hand. Buy orders are never
@@ -223,7 +332,14 @@ export default function LootCalculator() {
       </section>
 
       <div ref={resultsRef}>
-        {result && <ResultsPanel result={result} onRetryPrices={calculate} busy={busy} />}
+        {result && (
+          <ResultsPanel
+            result={result}
+            deductions={deductions}
+            onRetryPrices={calculate}
+            busy={busy}
+          />
+        )}
       </div>
     </div>
   );

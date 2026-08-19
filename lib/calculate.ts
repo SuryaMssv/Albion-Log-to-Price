@@ -2,6 +2,7 @@ import { aggregateRows, parseChestLog } from "./parser";
 import { resolveEntries } from "./resolver";
 import { fetchPrices, fetchSalesHistory, type Fetcher } from "./market";
 import { buildParticipantShares, computeSplit, priceEntries, totalValue } from "./calculator";
+import { applyDeductions, type DeductionsInput } from "./deductions";
 import type { CalculationResult, City, PriceBasis, ServerId } from "./types";
 import { isCity, PRICE_BASES, SERVERS } from "./types";
 
@@ -9,6 +10,8 @@ import { isCity, PRICE_BASES, SERVERS } from "./types";
 export const MAX_LOG_CHARS = 1_000_000;
 export const MAX_ROWS = 5_000;
 export const MAX_PARTICIPANTS = 100;
+export const MAX_REPAIR_COST = 1_000_000_000_000;
+export const MAX_TAX_PERCENT = 100;
 
 export class ValidationError extends Error {}
 
@@ -19,6 +22,9 @@ export interface CalculateInput {
   priceBasis: PriceBasis;
   participants: number;
   participantNames?: string[];
+  repairCost?: number;
+  sellerTaxPercent?: number;
+  marketTaxPercent?: number;
 }
 
 /** Validates and normalizes an untrusted request body. */
@@ -58,6 +64,10 @@ export function validateInput(body: unknown): CalculateInput {
     .slice(0, participants)
     .map((name) => (typeof name === "string" ? name.slice(0, 40).trim() : ""));
 
+  const repairCost = parseWholeSilver(raw.repair_cost, "Repair cost", MAX_REPAIR_COST);
+  const sellerTaxPercent = parsePercent(raw.seller_tax, "Seller's tax");
+  const marketTaxPercent = parsePercent(raw.market_tax, "Market tax");
+
   return {
     log,
     server: server as ServerId,
@@ -65,7 +75,28 @@ export function validateInput(body: unknown): CalculateInput {
     priceBasis: priceBasis as PriceBasis,
     participants,
     participantNames,
+    repairCost,
+    sellerTaxPercent,
+    marketTaxPercent,
   };
+}
+
+function parseWholeSilver(raw: unknown, label: string, max: number): number {
+  if (raw === undefined || raw === null || raw === "") return 0;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0 || value > max) {
+    throw new ValidationError(`${label} must be a whole number of silver from 0 to ${max.toLocaleString()}.`);
+  }
+  return value;
+}
+
+function parsePercent(raw: unknown, label: string): number {
+  if (raw === undefined || raw === null || raw === "") return 0;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0 || value > MAX_TAX_PERCENT) {
+    throw new ValidationError(`${label} must be a percentage from 0 to ${MAX_TAX_PERCENT}.`);
+  }
+  return value;
 }
 
 /**
@@ -118,28 +149,42 @@ export async function calculateLootSplit(
 
   const total = totalValue(priced);
   const { share, remainder } = computeSplit(total, input.participants);
-
-  return {
-    totalValue: total,
-    participants: input.participants,
-    share,
-    remainder,
-    participantShares: buildParticipantShares(input.participants, share, input.participantNames),
-    items: priced,
-    unresolvedItems: unresolved,
-    missingPrices: missing,
-    parseErrors: parsed.errors,
-    priceBasis: input.priceBasis,
-    server: input.server,
-    city: input.city,
-    stats: {
-      rowsParsed: parsed.rows.length,
-      rowsFailed: parsed.errors.length,
-      stacks: stacks.length,
-      itemsPriced: priced.length,
-      calculatedAt: new Date().toISOString(),
-      marketMs,
-    },
-    warnings: [...lookup.warnings, ...history.warnings],
+  const deductions: DeductionsInput = {
+    repairCost: input.repairCost ?? 0,
+    sellerTaxPercent: input.sellerTaxPercent ?? 0,
+    marketTaxPercent: input.marketTaxPercent ?? 0,
   };
+
+  return applyDeductions(
+    {
+      totalValue: total,
+      netValue: total,
+      repairCost: 0,
+      sellerTaxPercent: 0,
+      marketTaxPercent: 0,
+      sellerFee: 0,
+      marketFee: 0,
+      participants: input.participants,
+      share,
+      remainder,
+      participantShares: buildParticipantShares(input.participants, share, input.participantNames),
+      items: priced,
+      unresolvedItems: unresolved,
+      missingPrices: missing,
+      parseErrors: parsed.errors,
+      priceBasis: input.priceBasis,
+      server: input.server,
+      city: input.city,
+      stats: {
+        rowsParsed: parsed.rows.length,
+        rowsFailed: parsed.errors.length,
+        stacks: stacks.length,
+        itemsPriced: priced.length,
+        calculatedAt: new Date().toISOString(),
+        marketMs,
+      },
+      warnings: [...lookup.warnings, ...history.warnings],
+    },
+    deductions,
+  );
 }
