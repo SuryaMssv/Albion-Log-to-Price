@@ -37,8 +37,12 @@ function result(overrides: Partial<CalculationResult> = {}): CalculationResult {
     netValue: 100_000,
     repairCost: 0,
     sellerTaxPercent: 0,
-    marketTaxPercent: 0,
+    premium: true,
+    marketSetupPercent: 2.5,
+    marketTaxPercent: 4,
     sellerFee: 0,
+    marketSetupFee: 0,
+    marketTaxFee: 0,
     marketFee: 0,
     participants: 5,
     share: 20_000,
@@ -85,7 +89,7 @@ describe("applyManualPrices", () => {
       AT,
     );
     expect(updated.totalValue).toBe(280_000); // 100,000 + 90,000 x 2
-    expect(updated.share).toBe(56_000);
+    expect(updated.share).toBe(52_360);
     expect(updated.missingPrices.map((item) => item.itemId)).toEqual(["T4_SHOES_LEATHER_HELL@2"]);
     expect(updated.stats.itemsPriced).toBe(2);
   });
@@ -129,7 +133,7 @@ describe("applyManualPrices", () => {
       AT,
     );
     expect(updated.totalValue).toBe(100_003);
-    expect(updated.share).toBe(20_000);
+    expect(updated.share).toBe(18_700);
     expect(updated.remainder).toBe(3);
   });
 
@@ -166,7 +170,7 @@ describe("applyManualPrices — correcting an existing price", () => {
       priceDate: AT,
     });
     expect(updated.totalValue).toBe(27_000);
-    expect(updated.share).toBe(5_400);
+    expect(updated.share).toBe(5_049);
   });
 
   it("clears the recent-sale count when a sale price is overridden", () => {

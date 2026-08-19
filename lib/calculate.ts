@@ -24,7 +24,7 @@ export interface CalculateInput {
   participantNames?: string[];
   repairCost?: number;
   sellerTaxPercent?: number;
-  marketTaxPercent?: number;
+  premium?: boolean;
 }
 
 /** Validates and normalizes an untrusted request body. */
@@ -65,8 +65,8 @@ export function validateInput(body: unknown): CalculateInput {
     .map((name) => (typeof name === "string" ? name.slice(0, 40).trim() : ""));
 
   const repairCost = parseWholeSilver(raw.repair_cost, "Repair cost", MAX_REPAIR_COST);
-  const sellerTaxPercent = parsePercent(raw.seller_tax, "Seller's tax");
-  const marketTaxPercent = parsePercent(raw.market_tax, "Market tax");
+  const sellerTaxPercent = parsePercent(raw.seller_tax, "Seller buffer tax");
+  const premium = parsePremium(raw.premium);
 
   return {
     log,
@@ -77,7 +77,7 @@ export function validateInput(body: unknown): CalculateInput {
     participantNames,
     repairCost,
     sellerTaxPercent,
-    marketTaxPercent,
+    premium,
   };
 }
 
@@ -97,6 +97,14 @@ function parsePercent(raw: unknown, label: string): number {
     throw new ValidationError(`${label} must be a percentage from 0 to ${MAX_TAX_PERCENT}.`);
   }
   return value;
+}
+
+function parsePremium(raw: unknown): boolean {
+  if (raw === undefined || raw === null || raw === "") return true;
+  if (typeof raw !== "boolean") {
+    throw new ValidationError("Premium must be true or false.");
+  }
+  return raw;
 }
 
 /**
@@ -152,7 +160,7 @@ export async function calculateLootSplit(
   const deductions: DeductionsInput = {
     repairCost: input.repairCost ?? 0,
     sellerTaxPercent: input.sellerTaxPercent ?? 0,
-    marketTaxPercent: input.marketTaxPercent ?? 0,
+    premium: input.premium ?? true,
   };
 
   return applyDeductions(
@@ -161,8 +169,12 @@ export async function calculateLootSplit(
       netValue: total,
       repairCost: 0,
       sellerTaxPercent: 0,
-      marketTaxPercent: 0,
+      premium: true,
+      marketSetupPercent: 2.5,
+      marketTaxPercent: 4,
       sellerFee: 0,
+      marketSetupFee: 0,
+      marketTaxFee: 0,
       marketFee: 0,
       participants: input.participants,
       share,

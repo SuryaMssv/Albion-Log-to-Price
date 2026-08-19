@@ -176,8 +176,7 @@ export default function ResultsPanel({
       />
 
       <p className="text-xs text-muted">
-        Net is gross minus repair cost, seller&apos;s tax and market tax. Leave taxes at 0% when
-        the loot is not being sold.
+        Net is gross minus repair, seller buffer tax, market setup and market tax.
       </p>
     </div>
   );
@@ -187,10 +186,13 @@ function netBreakdown(result: CalculationResult): string {
   const parts: string[] = [];
   if (result.repairCost > 0) parts.push(`−${formatSilver(result.repairCost)} repair`);
   if (result.sellerFee > 0) {
-    parts.push(`−${formatPercent(result.sellerTaxPercent)}% seller (${formatSilver(result.sellerFee)})`);
+    parts.push(
+      `−${formatPercent(result.sellerTaxPercent)}% seller buffer (${formatSilver(result.sellerFee)})`,
+    );
   }
   if (result.marketFee > 0) {
-    parts.push(`−${formatPercent(result.marketTaxPercent)}% market (${formatSilver(result.marketFee)})`);
+    const total = result.marketSetupPercent + result.marketTaxPercent;
+    parts.push(`−${formatPercent(total)}% market (${formatSilver(result.marketFee)})`);
   }
   if (parts.length === 0) return "No repair or selling fees";
   return parts.join(" · ");

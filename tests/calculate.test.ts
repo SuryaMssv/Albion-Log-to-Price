@@ -70,7 +70,7 @@ describe("validateInput", () => {
       participants: 5,
       repairCost: 0,
       sellerTaxPercent: 0,
-      marketTaxPercent: 0,
+      premium: true,
     });
   });
 
@@ -114,20 +114,24 @@ describe("validateInput", () => {
     expect(input.participantNames).toEqual(["a".repeat(40), "Bo"]);
   });
 
-  it("accepts repair cost and tax percentages, defaulting them to zero", () => {
-    expect(validateInput({ log: "x", participants: 5, city: "Martlock" }).repairCost).toBe(0);
+  it("accepts repair cost, seller buffer tax, and premium flag", () => {
+    expect(validateInput({ log: "x", participants: 5, city: "Martlock" })).toMatchObject({
+      repairCost: 0,
+      sellerTaxPercent: 0,
+      premium: true,
+    });
     const input = validateInput({
       log: "x",
       participants: 5,
       city: "Martlock",
       repair_cost: 300_000,
       seller_tax: 4,
-      market_tax: 2.5,
+      premium: false,
     });
     expect(input).toMatchObject({
       repairCost: 300_000,
       sellerTaxPercent: 4,
-      marketTaxPercent: 2.5,
+      premium: false,
     });
   });
 
@@ -137,10 +141,10 @@ describe("validateInput", () => {
     ).toThrow(/Repair cost/);
     expect(() =>
       validateInput({ log: "x", participants: 5, city: "Martlock", seller_tax: 101 }),
-    ).toThrow(/Seller's tax/);
+    ).toThrow(/Seller buffer tax/);
     expect(() =>
-      validateInput({ log: "x", participants: 5, city: "Martlock", market_tax: -0.1 }),
-    ).toThrow(/Market tax/);
+      validateInput({ log: "x", participants: 5, city: "Martlock", premium: "yes" }),
+    ).toThrow(/Premium/);
   });
 });
 
@@ -157,7 +161,9 @@ describe("calculateLootSplit", () => {
     // 900,000 cowl + 100,000 bag, both listed in Caerleon, plus the potion at 12,000 x 2
     // picked up from Thetford by the global tier.
     expect(result.totalValue).toBe(1_024_000);
-    expect(result.share).toBe(204_800);
+    expect(result.marketFee).toBe(66_560);
+    expect(result.netValue).toBe(957_440);
+    expect(result.share).toBe(191_488);
     expect(result.remainder).toBe(0);
     expect(result.participantShares).toHaveLength(5);
 
@@ -182,16 +188,18 @@ describe("calculateLootSplit", () => {
         participants: 5,
         repairCost: 300_000,
         sellerTaxPercent: 4,
-        marketTaxPercent: 2.5,
+        premium: true,
       },
       fakeMarket,
     );
 
     expect(result.totalValue).toBe(1_024_000);
     expect(result.sellerFee).toBe(40_960);
-    expect(result.marketFee).toBe(25_600);
-    expect(result.netValue).toBe(657_440);
-    expect(result.share).toBe(131_488);
+    expect(result.marketSetupFee).toBe(25_600);
+    expect(result.marketTaxFee).toBe(40_960);
+    expect(result.marketFee).toBe(66_560);
+    expect(result.netValue).toBe(616_480);
+    expect(result.share).toBe(123_296);
   });
 
   it("walks the fallback chain in order: city, then other markets, then sales", async () => {
@@ -254,8 +262,8 @@ describe("calculateLootSplit", () => {
       fakeMarket,
     );
     expect(result.totalValue).toBe(1_024_000);
-    expect(result.share).toBe(341_333);
-    expect(result.remainder).toBe(1);
+    expect(result.share).toBe(319_146);
+    expect(result.remainder).toBe(2);
   });
 
   it("refuses a log with no parseable rows", async () => {
@@ -300,12 +308,15 @@ describe("output formats", () => {
     const message = buildDiscordMessage(result);
 
     expect(message).toContain("⚔️ **GANK LOOT SPLIT**");
-    expect(message).toContain("💰 Total Value: **1,024,000**");
+    expect(message).toContain("💰 Gross Value: **1,024,000**");
+    expect(message).toContain("📉 Market setup (2.5%): −25,600");
+    expect(message).toContain("📉 Market tax (4%): −40,960");
+    expect(message).toContain("💰 Net Value: **957,440**");
     expect(message).toContain("👥 Participants: **3**");
-    expect(message).toContain("🪙 Each: **341,333**");
-    expect(message).toContain("↩️ Remainder: 1 silver");
-    expect(message).toContain("• Ari — 341,333");
-    expect(message).toContain("• Player 3 — 341,333");
+    expect(message).toContain("🪙 Each: **319,146**");
+    expect(message).toContain("↩️ Remainder: 2 silver");
+    expect(message).toContain("• Ari — 319,146");
+    expect(message).toContain("• Player 3 — 319,146");
     expect(message).toContain("⚠️ 2 item stack(s) excluded");
     expect(message).toContain("📊 Price: East — Caerleon lowest sell order");
   });

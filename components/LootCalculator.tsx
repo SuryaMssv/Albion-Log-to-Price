@@ -50,7 +50,7 @@ export default function LootCalculator() {
   const [participants, setParticipants] = useState(5);
   const [repairCost, setRepairCost] = useState("");
   const [sellerTax, setSellerTax] = useState("");
-  const [marketTax, setMarketTax] = useState("");
+  const [premium, setPremium] = useState(true);
   const [useNames, setUseNames] = useState(false);
   const [names, setNames] = useState<string[]>([]);
   const [result, setResult] = useState<CalculationResult | null>(null);
@@ -62,9 +62,9 @@ export default function LootCalculator() {
     () => ({
       repairCost: parseSilverField(repairCost),
       sellerTaxPercent: parsePercentField(sellerTax),
-      marketTaxPercent: parsePercentField(marketTax),
+      premium,
     }),
-    [repairCost, sellerTax, marketTax],
+    [repairCost, sellerTax, premium],
   );
 
   const calculate = useCallback(async () => {
@@ -90,7 +90,7 @@ export default function LootCalculator() {
           participants,
           repair_cost: deductions.repairCost,
           seller_tax: deductions.sellerTaxPercent,
-          market_tax: deductions.marketTaxPercent,
+          premium: deductions.premium,
           participant_names: useNames ? names.slice(0, participants) : [],
         }),
       });
@@ -119,7 +119,7 @@ export default function LootCalculator() {
     setNames([]);
     setRepairCost("");
     setSellerTax("");
-    setMarketTax("");
+    setPremium(true);
   }
 
   function updateName(index: number, value: string) {
@@ -226,7 +226,7 @@ export default function LootCalculator() {
           </label>
 
           <label className="flex flex-col gap-1.5 text-sm">
-            <span className="text-muted">Seller&apos;s tax</span>
+            <span className="text-muted">Seller buffer tax</span>
             <div className="relative">
               <input
                 type="text"
@@ -245,30 +245,35 @@ export default function LootCalculator() {
             </div>
           </label>
 
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="text-muted">Market tax</span>
-            <div className="relative">
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="0"
-                value={marketTax}
-                onChange={(event) => {
-                  const raw = event.target.value.replace(/^0+(?=\d)/, "");
-                  if (isPercentDraft(raw)) setMarketTax(raw);
-                }}
-                className="min-h-11 w-full rounded-lg border border-border-soft bg-surface-raised px-3 pr-8 tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40"
-              />
-              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted">
-                %
-              </span>
+          <fieldset className="flex flex-col gap-1.5 text-sm">
+            <legend className="text-muted">Sellers Account</legend>
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-border-soft bg-surface-raised p-1">
+              <button
+                type="button"
+                aria-pressed={premium}
+                onClick={() => setPremium(true)}
+                className={`min-h-9 rounded-md px-2 text-sm font-medium transition-colors ${
+                  premium ? "bg-gold text-background" : "text-muted hover:text-foreground"
+                }`}
+              >
+                Premium
+              </button>
+              <button
+                type="button"
+                aria-pressed={!premium}
+                onClick={() => setPremium(false)}
+                className={`min-h-9 rounded-md px-2 text-sm font-medium transition-colors ${
+                  !premium ? "bg-gold text-background" : "text-muted hover:text-foreground"
+                }`}
+              >
+                Non-Premium
+              </button>
             </div>
-          </label>
+          </fieldset>
         </div>
 
         <p className="mt-2 text-xs text-muted">
-          Repair is silver. Seller&apos;s tax and market tax are percentages of gross loot — leave
-          them at 0% when the loot is not being sold.
+          Repair is silver. Seller buffer tax is an optional extra percent of gross.
         </p>
 
         <p className="mt-2 text-xs text-muted">

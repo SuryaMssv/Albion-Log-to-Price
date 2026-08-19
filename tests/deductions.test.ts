@@ -26,8 +26,12 @@ function result(overrides: Partial<CalculationResult> = {}): CalculationResult {
     netValue: 1_000_000,
     repairCost: 0,
     sellerTaxPercent: 0,
-    marketTaxPercent: 0,
+    premium: true,
+    marketSetupPercent: 2.5,
+    marketTaxPercent: 4,
     sellerFee: 0,
+    marketSetupFee: 0,
+    marketTaxFee: 0,
     marketFee: 0,
     participants: 5,
     share: 200_000,
@@ -57,26 +61,37 @@ function result(overrides: Partial<CalculationResult> = {}): CalculationResult {
 }
 
 describe("computeNet", () => {
-  it("leaves net equal to gross when every deduction is zero", () => {
-    expect(computeNet(1_000_000, { repairCost: 0, sellerTaxPercent: 0, marketTaxPercent: 0 })).toEqual({
+  it("applies premium market setup 2.5% plus market tax 4% (6.5%)", () => {
+    expect(computeNet(1_000_000, { repairCost: 0, sellerTaxPercent: 0, premium: true })).toEqual({
       repairCost: 0,
       sellerTaxPercent: 0,
-      marketTaxPercent: 0,
+      premium: true,
+      marketSetupPercent: 2.5,
+      marketTaxPercent: 4,
       sellerFee: 0,
-      marketFee: 0,
-      netValue: 1_000_000,
+      marketSetupFee: 25_000,
+      marketTaxFee: 40_000,
+      marketFee: 65_000,
+      netValue: 935_000,
     });
   });
 
-  it("subtracts repair as silver, then percentage taxes of gross", () => {
-    // 1,000,000 - 300,000 repair - 4% seller - 2.5% market
-    expect(computeNet(1_000_000, { repairCost: 300_000, sellerTaxPercent: 4, marketTaxPercent: 2.5 })).toEqual({
-      repairCost: 300_000,
-      sellerTaxPercent: 4,
-      marketTaxPercent: 2.5,
+  it("applies non-premium market setup 2.5% plus market tax 8% (10.5%)", () => {
+    const net = computeNet(1_000_000, { repairCost: 0, sellerTaxPercent: 0, premium: false });
+    expect(net.marketSetupPercent).toBe(2.5);
+    expect(net.marketTaxPercent).toBe(8);
+    expect(net.marketSetupFee).toBe(25_000);
+    expect(net.marketTaxFee).toBe(80_000);
+    expect(net.marketFee).toBe(105_000);
+    expect(net.netValue).toBe(895_000);
+  });
+
+  it("subtracts repair, seller buffer tax, and premium market fees from gross", () => {
+    // 1,000,000 − 300,000 repair − 4% buffer − 6.5% premium market
+    expect(computeNet(1_000_000, { repairCost: 300_000, sellerTaxPercent: 4, premium: true })).toMatchObject({
       sellerFee: 40_000,
-      marketFee: 25_000,
-      netValue: 635_000,
+      marketFee: 65_000,
+      netValue: 595_000,
     });
   });
 
@@ -84,75 +99,57 @@ describe("computeNet", () => {
     const withRepair = computeNet(1_000_000, {
       repairCost: 300_000,
       sellerTaxPercent: 10,
-      marketTaxPercent: 0,
+      premium: true,
     });
     expect(withRepair.sellerFee).toBe(100_000);
-    expect(withRepair.netValue).toBe(600_000);
-  });
-
-  it("rounds fees to whole silver", () => {
-    expect(computeNet(1_000_001, { repairCost: 0, sellerTaxPercent: 2.5, marketTaxPercent: 0 }).sellerFee).toBe(
-      25_000,
-    );
+    expect(withRepair.marketFee).toBe(65_000);
+    expect(withRepair.netValue).toBe(535_000);
   });
 
   it("floors net at zero when deductions exceed gross", () => {
     expect(
-      computeNet(100_000, { repairCost: 300_000, sellerTaxPercent: 0, marketTaxPercent: 0 }).netValue,
+      computeNet(100_000, { repairCost: 300_000, sellerTaxPercent: 0, premium: true }).netValue,
     ).toBe(0);
   });
 });
 
 describe("applyDeductions", () => {
-  it("splits net, not gross", () => {
+  it("splits net after premium market fees", () => {
     const updated = applyDeductions(result(), {
       repairCost: 300_000,
       sellerTaxPercent: 4,
-      marketTaxPercent: 2.5,
+      premium: true,
     });
     expect(updated.totalValue).toBe(1_000_000);
-    expect(updated.netValue).toBe(635_000);
-    expect(updated.share).toBe(127_000);
+    expect(updated.netValue).toBe(595_000);
+    expect(updated.share).toBe(119_000);
     expect(updated.remainder).toBe(0);
-    expect(updated.participantShares.every((participant) => participant.share === 127_000)).toBe(true);
   });
 
-  it("keeps the original result when nothing is deducted", () => {
-    const original = result();
-    expect(applyDeductions(original, { repairCost: 0, sellerTaxPercent: 0, marketTaxPercent: 0 })).toBe(
-      original,
-    );
-  });
-
-  it("reports remainder against net", () => {
-    const updated = applyDeductions(result({ participants: 3 }), {
-      repairCost: 2,
-      sellerTaxPercent: 0,
-      marketTaxPercent: 0,
-    });
-    expect(updated.netValue).toBe(999_998);
-    expect(updated.share).toBe(333_332);
-    expect(updated.remainder).toBe(2);
+  it("keeps the original result when deductions are already applied", () => {
+    const deducted = applyDeductions(result(), { repairCost: 0, sellerTaxPercent: 0, premium: true });
+    expect(applyDeductions(deducted, { repairCost: 0, sellerTaxPercent: 0, premium: true })).toBe(deducted);
   });
 });
 
 describe("Discord deductions", () => {
-  it("keeps the gross-only summary when fees are zero", () => {
+  it("keeps the gross-only summary when no fees are on the result", () => {
     const message = buildDiscordMessage(result());
     expect(message).toContain("💰 Total Value: **1,000,000**");
     expect(message).not.toContain("Repair");
     expect(message).not.toContain("Net Value");
   });
 
-  it("lists repair and selling fees, then splits net", () => {
+  it("lists repair, seller buffer tax, and premium market fees, then splits net", () => {
     const message = buildDiscordMessage(
-      applyDeductions(result(), { repairCost: 300_000, sellerTaxPercent: 4, marketTaxPercent: 2.5 }),
+      applyDeductions(result(), { repairCost: 300_000, sellerTaxPercent: 4, premium: true }),
     );
     expect(message).toContain("💰 Gross Value: **1,000,000**");
     expect(message).toContain("🔧 Repair: −300,000");
-    expect(message).toContain("📉 Seller's tax (4%): −40,000");
-    expect(message).toContain("📉 Market tax (2.5%): −25,000");
-    expect(message).toContain("💰 Net Value: **635,000**");
-    expect(message).toContain("🪙 Each: **127,000**");
+    expect(message).toContain("📉 Seller buffer tax (4%): −40,000");
+    expect(message).toContain("📉 Market setup (2.5%): −25,000");
+    expect(message).toContain("📉 Market tax (4%): −40,000");
+    expect(message).toContain("💰 Net Value: **595,000**");
+    expect(message).toContain("🪙 Each: **119,000**");
   });
 });

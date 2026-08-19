@@ -4,37 +4,59 @@ import type { CalculationResult } from "./types";
 export interface DeductionsInput {
   repairCost: number;
   sellerTaxPercent: number;
-  marketTaxPercent: number;
+  premium: boolean;
 }
 
-export interface DeductionBreakdown extends DeductionsInput {
+export interface DeductionBreakdown {
+  repairCost: number;
+  sellerTaxPercent: number;
+  premium: boolean;
+  marketSetupPercent: number;
+  marketTaxPercent: number;
   sellerFee: number;
+  marketSetupFee: number;
+  marketTaxFee: number;
   marketFee: number;
   netValue: number;
 }
 
+export const MARKET_SETUP_PERCENT = 2.5;
+export const PREMIUM_MARKET_TAX_PERCENT = 4;
+export const NON_PREMIUM_MARKET_TAX_PERCENT = 8;
+
 export const ZERO_DEDUCTIONS: DeductionsInput = {
   repairCost: 0,
   sellerTaxPercent: 0,
-  marketTaxPercent: 0,
+  premium: true,
 };
 
-function isZero(deductions: DeductionsInput): boolean {
-  return deductions.repairCost === 0 && deductions.sellerTaxPercent === 0 && deductions.marketTaxPercent === 0;
+export function marketRates(premium: boolean): { setupPercent: number; taxPercent: number } {
+  return {
+    setupPercent: MARKET_SETUP_PERCENT,
+    taxPercent: premium ? PREMIUM_MARKET_TAX_PERCENT : NON_PREMIUM_MARKET_TAX_PERCENT,
+  };
 }
 
 /**
- * Gross − repair − seller tax − market tax. Taxes are percentages of gross (the sale
- * price), not of (gross − repair). Net never goes below zero.
+ * Gross − repair − seller buffer tax − market setup − market tax.
+ * Premium: 2.5% + 4% = 6.5%. Non-premium: 2.5% + 8% = 10.5%.
+ * Percentages are of gross. Net never goes below zero.
  */
 export function computeNet(gross: number, deductions: DeductionsInput): DeductionBreakdown {
+  const rates = marketRates(deductions.premium);
   const sellerFee = Math.round((gross * deductions.sellerTaxPercent) / 100);
-  const marketFee = Math.round((gross * deductions.marketTaxPercent) / 100);
+  const marketSetupFee = Math.round((gross * rates.setupPercent) / 100);
+  const marketTaxFee = Math.round((gross * rates.taxPercent) / 100);
+  const marketFee = marketSetupFee + marketTaxFee;
   return {
     repairCost: deductions.repairCost,
     sellerTaxPercent: deductions.sellerTaxPercent,
-    marketTaxPercent: deductions.marketTaxPercent,
+    premium: deductions.premium,
+    marketSetupPercent: rates.setupPercent,
+    marketTaxPercent: rates.taxPercent,
     sellerFee,
+    marketSetupFee,
+    marketTaxFee,
     marketFee,
     netValue: Math.max(0, gross - deductions.repairCost - sellerFee - marketFee),
   };
@@ -45,25 +67,29 @@ export function hasDeductions(result: CalculationResult): boolean {
   return result.repairCost > 0 || result.sellerFee > 0 || result.marketFee > 0;
 }
 
+function alreadyApplied(result: CalculationResult, breakdown: DeductionBreakdown): boolean {
+  return (
+    result.repairCost === breakdown.repairCost &&
+    result.sellerTaxPercent === breakdown.sellerTaxPercent &&
+    result.premium === breakdown.premium &&
+    result.marketSetupFee === breakdown.marketSetupFee &&
+    result.marketTaxFee === breakdown.marketTaxFee &&
+    result.marketFee === breakdown.marketFee &&
+    result.netValue === breakdown.netValue
+  );
+}
+
 /**
- * Re-splits a result on net distributable value. Zero deductions keep the original
- * object when it already splits gross.
+ * Re-splits a result on net distributable value. Returns the same object when the
+ * requested deductions are already applied.
  */
 export function applyDeductions(
   result: CalculationResult,
   deductions: DeductionsInput = ZERO_DEDUCTIONS,
 ): CalculationResult {
-  if (
-    isZero(deductions) &&
-    result.repairCost === 0 &&
-    result.sellerFee === 0 &&
-    result.marketFee === 0 &&
-    result.netValue === result.totalValue
-  ) {
-    return result;
-  }
-
   const breakdown = computeNet(result.totalValue, deductions);
+  if (alreadyApplied(result, breakdown)) return result;
+
   const { share, remainder } = computeSplit(breakdown.netValue, result.participants);
 
   return {

@@ -17,12 +17,17 @@ export function buildDiscordMessage(result: CalculationResult): string {
     }
     if (result.sellerFee > 0) {
       lines.push(
-        `📉 Seller's tax (${formatPercent(result.sellerTaxPercent)}%): −${formatSilver(result.sellerFee)}`,
+        `📉 Seller buffer tax (${formatPercent(result.sellerTaxPercent)}%): −${formatSilver(result.sellerFee)}`,
       );
     }
-    if (result.marketFee > 0) {
+    if (result.marketSetupFee > 0) {
       lines.push(
-        `📉 Market tax (${formatPercent(result.marketTaxPercent)}%): −${formatSilver(result.marketFee)}`,
+        `📉 Market setup (${formatPercent(result.marketSetupPercent)}%): −${formatSilver(result.marketSetupFee)}`,
+      );
+    }
+    if (result.marketTaxFee > 0) {
+      lines.push(
+        `📉 Market tax (${formatPercent(result.marketTaxPercent)}%): −${formatSilver(result.marketTaxFee)}`,
       );
     }
     lines.push(`💰 Net Value: **${formatSilver(result.netValue)}**`);

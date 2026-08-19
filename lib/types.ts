@@ -166,10 +166,15 @@ export interface CalculationResult {
   netValue: number;
   repairCost: number;
   sellerTaxPercent: number;
+  /** Premium account uses 4% market tax; non-premium uses 8%. Setup is always 2.5%. */
+  premium: boolean;
+  marketSetupPercent: number;
   marketTaxPercent: number;
-  /** Whole silver taken as seller's tax (percent of gross). */
+  /** Whole silver taken as seller buffer tax (percent of gross). */
   sellerFee: number;
-  /** Whole silver taken as market tax (percent of gross). */
+  marketSetupFee: number;
+  marketTaxFee: number;
+  /** Setup fee plus market tax, in whole silver. */
   marketFee: number;
   participants: number;
   share: number;
