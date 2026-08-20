@@ -24,6 +24,7 @@ export interface CalculateInput {
   participantNames?: string[];
   repairCost?: number;
   sellerTaxPercent?: number;
+  guildTaxPercent?: number;
   premium?: boolean;
 }
 
@@ -66,6 +67,7 @@ export function validateInput(body: unknown): CalculateInput {
 
   const repairCost = parseWholeSilver(raw.repair_cost, "Repair cost", MAX_REPAIR_COST);
   const sellerTaxPercent = parsePercent(raw.seller_tax, "Seller buffer tax");
+  const guildTaxPercent = parsePercent(raw.guild_tax, "Guild tax");
   const premium = parsePremium(raw.premium);
 
   return {
@@ -77,6 +79,7 @@ export function validateInput(body: unknown): CalculateInput {
     participantNames,
     repairCost,
     sellerTaxPercent,
+    guildTaxPercent,
     premium,
   };
 }
@@ -160,6 +163,7 @@ export async function calculateLootSplit(
   const deductions: DeductionsInput = {
     repairCost: input.repairCost ?? 0,
     sellerTaxPercent: input.sellerTaxPercent ?? 0,
+    guildTaxPercent: input.guildTaxPercent ?? 0,
     premium: input.premium ?? true,
   };
 
@@ -169,10 +173,12 @@ export async function calculateLootSplit(
       netValue: total,
       repairCost: 0,
       sellerTaxPercent: 0,
+      guildTaxPercent: 0,
       premium: true,
       marketSetupPercent: 2.5,
       marketTaxPercent: 4,
       sellerFee: 0,
+      guildFee: 0,
       marketSetupFee: 0,
       marketTaxFee: 0,
       marketFee: 0,

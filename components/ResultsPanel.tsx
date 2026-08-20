@@ -176,7 +176,7 @@ export default function ResultsPanel({
       />
 
       <p className="text-xs text-muted">
-        Net is gross minus repair, seller buffer tax, market setup and market tax.
+        Net is gross minus repair, seller buffer tax, guild tax, market setup and market tax.
       </p>
     </div>
   );
@@ -189,6 +189,9 @@ function netBreakdown(result: CalculationResult): string {
     parts.push(
       `−${formatPercent(result.sellerTaxPercent)}% seller buffer (${formatSilver(result.sellerFee)})`,
     );
+  }
+  if (result.guildFee > 0) {
+    parts.push(`−${formatPercent(result.guildTaxPercent)}% guild (${formatSilver(result.guildFee)})`);
   }
   if (result.marketFee > 0) {
     const total = result.marketSetupPercent + result.marketTaxPercent;

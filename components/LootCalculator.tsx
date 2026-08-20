@@ -50,6 +50,7 @@ export default function LootCalculator() {
   const [participants, setParticipants] = useState(5);
   const [repairCost, setRepairCost] = useState("");
   const [sellerTax, setSellerTax] = useState("");
+  const [guildTax, setGuildTax] = useState("");
   const [premium, setPremium] = useState(true);
   const [useNames, setUseNames] = useState(false);
   const [names, setNames] = useState<string[]>([]);
@@ -62,9 +63,10 @@ export default function LootCalculator() {
     () => ({
       repairCost: parseSilverField(repairCost),
       sellerTaxPercent: parsePercentField(sellerTax),
+      guildTaxPercent: parsePercentField(guildTax),
       premium,
     }),
-    [repairCost, sellerTax, premium],
+    [repairCost, sellerTax, guildTax, premium],
   );
 
   const calculate = useCallback(async () => {
@@ -90,6 +92,7 @@ export default function LootCalculator() {
           participants,
           repair_cost: deductions.repairCost,
           seller_tax: deductions.sellerTaxPercent,
+          guild_tax: deductions.guildTaxPercent,
           premium: deductions.premium,
           participant_names: useNames ? names.slice(0, participants) : [],
         }),
@@ -119,6 +122,7 @@ export default function LootCalculator() {
     setNames([]);
     setRepairCost("");
     setSellerTax("");
+    setGuildTax("");
     setPremium(true);
   }
 
@@ -207,7 +211,7 @@ export default function LootCalculator() {
           </label>
         </div>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="text-muted">Repair cost</span>
             <input
@@ -245,6 +249,26 @@ export default function LootCalculator() {
             </div>
           </label>
 
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-muted">Guild tax</span>
+            <div className="relative">
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="0"
+                value={guildTax}
+                onChange={(event) => {
+                  const raw = event.target.value.replace(/^0+(?=\d)/, "");
+                  if (isPercentDraft(raw)) setGuildTax(raw);
+                }}
+                className="min-h-11 w-full rounded-lg border border-border-soft bg-surface-raised px-3 pr-8 tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40"
+              />
+              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted">
+                %
+              </span>
+            </div>
+          </label>
+
           <fieldset className="flex flex-col gap-1.5 text-sm">
             <legend className="text-muted">Sellers Account</legend>
             <div className="grid grid-cols-2 gap-1 rounded-lg border border-border-soft bg-surface-raised p-1">
@@ -273,7 +297,7 @@ export default function LootCalculator() {
         </div>
 
         <p className="mt-2 text-xs text-muted">
-          Repair is silver. Seller buffer tax is an optional extra percent of gross.
+          Repair is silver. Seller buffer tax and guild tax are optional percents of gross.
         </p>
 
         <p className="mt-2 text-xs text-muted">

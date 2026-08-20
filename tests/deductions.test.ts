@@ -26,10 +26,12 @@ function result(overrides: Partial<CalculationResult> = {}): CalculationResult {
     netValue: 1_000_000,
     repairCost: 0,
     sellerTaxPercent: 0,
+    guildTaxPercent: 0,
     premium: true,
     marketSetupPercent: 2.5,
     marketTaxPercent: 4,
     sellerFee: 0,
+    guildFee: 0,
     marketSetupFee: 0,
     marketTaxFee: 0,
     marketFee: 0,
@@ -62,13 +64,15 @@ function result(overrides: Partial<CalculationResult> = {}): CalculationResult {
 
 describe("computeNet", () => {
   it("applies premium market setup 2.5% plus market tax 4% (6.5%)", () => {
-    expect(computeNet(1_000_000, { repairCost: 0, sellerTaxPercent: 0, premium: true })).toEqual({
+    expect(computeNet(1_000_000, { repairCost: 0, sellerTaxPercent: 0, guildTaxPercent: 0, premium: true })).toEqual({
       repairCost: 0,
       sellerTaxPercent: 0,
+      guildTaxPercent: 0,
       premium: true,
       marketSetupPercent: 2.5,
       marketTaxPercent: 4,
       sellerFee: 0,
+      guildFee: 0,
       marketSetupFee: 25_000,
       marketTaxFee: 40_000,
       marketFee: 65_000,
@@ -77,7 +81,7 @@ describe("computeNet", () => {
   });
 
   it("applies non-premium market setup 2.5% plus market tax 8% (10.5%)", () => {
-    const net = computeNet(1_000_000, { repairCost: 0, sellerTaxPercent: 0, premium: false });
+    const net = computeNet(1_000_000, { repairCost: 0, sellerTaxPercent: 0, guildTaxPercent: 0, premium: false });
     expect(net.marketSetupPercent).toBe(2.5);
     expect(net.marketTaxPercent).toBe(8);
     expect(net.marketSetupFee).toBe(25_000);
@@ -88,10 +92,22 @@ describe("computeNet", () => {
 
   it("subtracts repair, seller buffer tax, and premium market fees from gross", () => {
     // 1,000,000 − 300,000 repair − 4% buffer − 6.5% premium market
-    expect(computeNet(1_000_000, { repairCost: 300_000, sellerTaxPercent: 4, premium: true })).toMatchObject({
+    expect(
+      computeNet(1_000_000, { repairCost: 300_000, sellerTaxPercent: 4, guildTaxPercent: 0, premium: true }),
+    ).toMatchObject({
       sellerFee: 40_000,
+      guildFee: 0,
       marketFee: 65_000,
       netValue: 595_000,
+    });
+  });
+
+  it("subtracts guild tax as a percent of gross", () => {
+    expect(
+      computeNet(1_000_000, { repairCost: 300_000, sellerTaxPercent: 4, guildTaxPercent: 10, premium: true }),
+    ).toMatchObject({
+      guildFee: 100_000,
+      netValue: 495_000,
     });
   });
 
@@ -99,6 +115,7 @@ describe("computeNet", () => {
     const withRepair = computeNet(1_000_000, {
       repairCost: 300_000,
       sellerTaxPercent: 10,
+      guildTaxPercent: 0,
       premium: true,
     });
     expect(withRepair.sellerFee).toBe(100_000);
@@ -108,7 +125,7 @@ describe("computeNet", () => {
 
   it("floors net at zero when deductions exceed gross", () => {
     expect(
-      computeNet(100_000, { repairCost: 300_000, sellerTaxPercent: 0, premium: true }).netValue,
+      computeNet(100_000, { repairCost: 300_000, sellerTaxPercent: 0, guildTaxPercent: 0, premium: true }).netValue,
     ).toBe(0);
   });
 });
@@ -118,6 +135,7 @@ describe("applyDeductions", () => {
     const updated = applyDeductions(result(), {
       repairCost: 300_000,
       sellerTaxPercent: 4,
+      guildTaxPercent: 0,
       premium: true,
     });
     expect(updated.totalValue).toBe(1_000_000);
@@ -127,8 +145,8 @@ describe("applyDeductions", () => {
   });
 
   it("keeps the original result when deductions are already applied", () => {
-    const deducted = applyDeductions(result(), { repairCost: 0, sellerTaxPercent: 0, premium: true });
-    expect(applyDeductions(deducted, { repairCost: 0, sellerTaxPercent: 0, premium: true })).toBe(deducted);
+    const deducted = applyDeductions(result(), { repairCost: 0, sellerTaxPercent: 0, guildTaxPercent: 0, premium: true });
+    expect(applyDeductions(deducted, { repairCost: 0, sellerTaxPercent: 0, guildTaxPercent: 0, premium: true })).toBe(deducted);
   });
 });
 
@@ -142,14 +160,15 @@ describe("Discord deductions", () => {
 
   it("lists repair, seller buffer tax, and premium market fees, then splits net", () => {
     const message = buildDiscordMessage(
-      applyDeductions(result(), { repairCost: 300_000, sellerTaxPercent: 4, premium: true }),
+      applyDeductions(result(), { repairCost: 300_000, sellerTaxPercent: 4, guildTaxPercent: 10, premium: true }),
     );
     expect(message).toContain("💰 Gross Value: **1,000,000**");
     expect(message).toContain("🔧 Repair: −300,000");
     expect(message).toContain("📉 Seller buffer tax (4%): −40,000");
+    expect(message).toContain("📉 Guild tax (10%): −100,000");
     expect(message).toContain("📉 Market setup (2.5%): −25,000");
     expect(message).toContain("📉 Market tax (4%): −40,000");
-    expect(message).toContain("💰 Net Value: **595,000**");
-    expect(message).toContain("🪙 Each: **119,000**");
+    expect(message).toContain("💰 Net Value: **495,000**");
+    expect(message).toContain("🪙 Each: **99,000**");
   });
 });

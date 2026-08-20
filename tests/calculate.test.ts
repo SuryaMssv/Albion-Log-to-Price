@@ -70,6 +70,7 @@ describe("validateInput", () => {
       participants: 5,
       repairCost: 0,
       sellerTaxPercent: 0,
+      guildTaxPercent: 0,
       premium: true,
     });
   });
@@ -118,6 +119,7 @@ describe("validateInput", () => {
     expect(validateInput({ log: "x", participants: 5, city: "Martlock" })).toMatchObject({
       repairCost: 0,
       sellerTaxPercent: 0,
+      guildTaxPercent: 0,
       premium: true,
     });
     const input = validateInput({
@@ -126,11 +128,13 @@ describe("validateInput", () => {
       city: "Martlock",
       repair_cost: 300_000,
       seller_tax: 4,
+      guild_tax: 10,
       premium: false,
     });
     expect(input).toMatchObject({
       repairCost: 300_000,
       sellerTaxPercent: 4,
+      guildTaxPercent: 10,
       premium: false,
     });
   });
@@ -142,6 +146,9 @@ describe("validateInput", () => {
     expect(() =>
       validateInput({ log: "x", participants: 5, city: "Martlock", seller_tax: 101 }),
     ).toThrow(/Seller buffer tax/);
+    expect(() =>
+      validateInput({ log: "x", participants: 5, city: "Martlock", guild_tax: 101 }),
+    ).toThrow(/Guild tax/);
     expect(() =>
       validateInput({ log: "x", participants: 5, city: "Martlock", premium: "yes" }),
     ).toThrow(/Premium/);

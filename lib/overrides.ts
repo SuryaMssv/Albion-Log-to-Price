@@ -96,6 +96,7 @@ export function applyManualPrices(
     {
       repairCost: result.repairCost,
       sellerTaxPercent: result.sellerTaxPercent,
+      guildTaxPercent: result.guildTaxPercent,
       premium: result.premium,
     },
   );

@@ -20,6 +20,11 @@ export function buildDiscordMessage(result: CalculationResult): string {
         `📉 Seller buffer tax (${formatPercent(result.sellerTaxPercent)}%): −${formatSilver(result.sellerFee)}`,
       );
     }
+    if (result.guildFee > 0) {
+      lines.push(
+        `📉 Guild tax (${formatPercent(result.guildTaxPercent)}%): −${formatSilver(result.guildFee)}`,
+      );
+    }
     if (result.marketSetupFee > 0) {
       lines.push(
         `📉 Market setup (${formatPercent(result.marketSetupPercent)}%): −${formatSilver(result.marketSetupFee)}`,
