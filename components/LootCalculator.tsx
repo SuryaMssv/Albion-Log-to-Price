@@ -42,12 +42,26 @@ function isPercentDraft(raw: string): boolean {
   return Number.isFinite(value) && value <= MAX_TAX_PERCENT;
 }
 
+function parseParticipantsField(raw: string): number {
+  if (raw.trim() === "") return 0;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 1) return 0;
+  return Math.min(MAX_PARTICIPANTS, Math.trunc(value));
+}
+
+function isParticipantDraft(raw: string): boolean {
+  if (raw === "") return true;
+  if (!/^\d+$/.test(raw)) return false;
+  const value = Number(raw);
+  return value <= MAX_PARTICIPANTS;
+}
+
 export default function LootCalculator() {
   const [log, setLog] = useState("");
   const [server, setServer] = useState<ServerId>("east");
   const [city, setCity] = useState<City | "">("");
   const [priceBasis, setPriceBasis] = useState<PriceBasis>("sell_mid");
-  const [participants, setParticipants] = useState(5);
+  const [participants, setParticipants] = useState("5");
   const [repairCost, setRepairCost] = useState("");
   const [sellerTax, setSellerTax] = useState("");
   const [guildTax, setGuildTax] = useState("");
@@ -68,6 +82,7 @@ export default function LootCalculator() {
     }),
     [repairCost, sellerTax, guildTax, premium],
   );
+  const participantCount = parseParticipantsField(participants);
 
   const calculate = useCallback(async () => {
     if (log.trim() === "") {
@@ -76,6 +91,10 @@ export default function LootCalculator() {
     }
     if (city === "") {
       setError("Select the city to price the loot against.");
+      return;
+    }
+    if (participantCount < 1) {
+      setError("Enter how many participants split the loot.");
       return;
     }
     setBusy(true);
@@ -89,12 +108,12 @@ export default function LootCalculator() {
           server,
           city,
           price_basis: priceBasis,
-          participants,
+          participants: participantCount,
           repair_cost: deductions.repairCost,
           seller_tax: deductions.sellerTaxPercent,
           guild_tax: deductions.guildTaxPercent,
           premium: deductions.premium,
-          participant_names: useNames ? names.slice(0, participants) : [],
+          participant_names: useNames ? names.slice(0, participantCount) : [],
         }),
       });
       const payload = await response.json();
@@ -113,7 +132,7 @@ export default function LootCalculator() {
     } finally {
       setBusy(false);
     }
-  }, [log, server, city, priceBasis, participants, deductions, useNames, names]);
+  }, [log, server, city, priceBasis, participantCount, deductions, useNames, names]);
 
   function clearAll() {
     setLog("");
@@ -195,18 +214,15 @@ export default function LootCalculator() {
           <label className="flex flex-col gap-1.5 text-sm">
             <span className="text-muted">Participants</span>
             <input
-              type="number"
+              type="text"
               inputMode="numeric"
-              min={1}
-              max={MAX_PARTICIPANTS}
+              placeholder="5"
               value={participants}
               onChange={(event) => {
-                const value = Number(event.target.value);
-                if (Number.isFinite(value)) {
-                  setParticipants(Math.min(MAX_PARTICIPANTS, Math.max(1, Math.trunc(value))));
-                }
+                const raw = event.target.value.replace(/^0+(?=\d)/, "");
+                if (isParticipantDraft(raw)) setParticipants(raw);
               }}
-              className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-3 tabular-nums text-foreground outline-none focus:ring-2 focus:ring-gold/40"
+              className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-3 tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40"
             />
           </label>
         </div>
@@ -319,7 +335,7 @@ export default function LootCalculator() {
 
           {useNames && (
             <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {Array.from({ length: participants }, (_, index) => (
+              {Array.from({ length: Math.max(participantCount, 1) }, (_, index) => (
                 <input
                   key={index}
                   type="text"
