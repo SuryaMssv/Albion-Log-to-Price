@@ -25,14 +25,10 @@ export function buildDiscordMessage(result: CalculationResult): string {
         `📉 Guild tax (${formatPercent(result.guildTaxPercent)}%): −${formatSilver(result.guildFee)}`,
       );
     }
-    if (result.marketSetupFee > 0) {
+    if (result.marketFee > 0) {
+      const total = result.marketSetupPercent + result.marketTaxPercent;
       lines.push(
-        `📉 Market setup (${formatPercent(result.marketSetupPercent)}%): −${formatSilver(result.marketSetupFee)}`,
-      );
-    }
-    if (result.marketTaxFee > 0) {
-      lines.push(
-        `📉 Market tax (${formatPercent(result.marketTaxPercent)}%): −${formatSilver(result.marketTaxFee)}`,
+        `📉 Market (${formatPercent(total)}%): −${formatSilver(result.marketFee)}`,
       );
     }
     lines.push(`💰 Net Value: **${formatSilver(result.netValue)}**`);

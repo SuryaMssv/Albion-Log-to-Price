@@ -166,9 +166,18 @@ describe("Discord deductions", () => {
     expect(message).toContain("🔧 Repair: −300,000");
     expect(message).toContain("📉 Seller buffer tax (4%): −40,000");
     expect(message).toContain("📉 Guild tax (10%): −100,000");
-    expect(message).toContain("📉 Market setup (2.5%): −25,000");
-    expect(message).toContain("📉 Market tax (4%): −40,000");
+    expect(message).toContain("📉 Market (6.5%): −65,000");
     expect(message).toContain("💰 Net Value: **495,000**");
     expect(message).toContain("🪙 Each: **99,000**");
+  });
+
+  it("lists non-premium market fees as a combined 10.5%", () => {
+    const message = buildDiscordMessage(
+      applyDeductions(result(), { repairCost: 0, sellerTaxPercent: 0, guildTaxPercent: 0, premium: false }),
+    );
+    expect(message).toContain("📉 Market (10.5%): −105,000");
+    expect(message).not.toContain("Market setup");
+    expect(message).not.toContain("Market tax");
+    expect(message).toContain("💰 Net Value: **895,000**");
   });
 });

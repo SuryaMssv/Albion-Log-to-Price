@@ -316,8 +316,7 @@ describe("output formats", () => {
 
     expect(message).toContain("⚔️ **GANK LOOT SPLIT**");
     expect(message).toContain("💰 Gross Value: **1,024,000**");
-    expect(message).toContain("📉 Market setup (2.5%): −25,600");
-    expect(message).toContain("📉 Market tax (4%): −40,960");
+    expect(message).toContain("📉 Market (6.5%): −66,560");
     expect(message).toContain("💰 Net Value: **957,440**");
     expect(message).toContain("👥 Participants: **3**");
     expect(message).toContain("🪙 Each: **319,146**");
