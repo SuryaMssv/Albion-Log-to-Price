@@ -187,11 +187,13 @@ export function parseChestLog(text: string): ParseResult {
     }
 
     const amount = parseInteger(tokens[columns.amount] ?? "");
-    if (amount === null || amount <= 0) {
+    // Negative amounts are withdrawals. Zero is a no-op and is rejected so a
+    // bad cell cannot silently vanish from the log.
+    if (amount === null || amount === 0) {
       errors.push({
         line,
         raw: raw.trim(),
-        reason: `Amount must be a whole number greater than 0 (got "${tokens[columns.amount]}").`,
+        reason: `Amount must be a non-zero whole number (got "${tokens[columns.amount]}").`,
       });
       return;
     }
@@ -211,32 +213,81 @@ export function parseChestLog(text: string): ParseResult {
 }
 
 /**
+ * Albion chest copies use `MM/DD/YYYY HH:MM:SS`. Returns UTC ms, or null if the
+ * cell is not a date — aggregation then falls back to line order.
+ */
+function parseChestDate(raw: string): number | null {
+  const match = raw
+    .trim()
+    .match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!match) return null;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  const year = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return Date.UTC(year, month - 1, day, Number(match[4] ?? 0), Number(match[5] ?? 0), Number(match[6] ?? 0));
+}
+
+/** Oldest event first. Equal timestamps keep file order. */
+function compareChestRows(a: ParsedRow, b: ParsedRow): number {
+  const timeA = parseChestDate(a.date);
+  const timeB = parseChestDate(b.date);
+  if (timeA !== null && timeB !== null && timeA !== timeB) return timeA - timeB;
+  return a.line - b.line;
+}
+
+function stackKey(row: ParsedRow): string {
+  return `${row.item.replace(/\s+/g, " ").trim().toLowerCase()}|${row.enchantment}|${row.quality}`;
+}
+
+function isTrash(name: string): boolean {
+  return name.replace(/\s+/g, " ").trim().toLowerCase() === "trash";
+}
+
+/**
  * Merges rows sharing item name + enchantment + quality into one stack (FR-14),
  * keeping the contributing players and source line numbers for auditability.
+ *
+ * Withdrawals (negative amounts) cancel earlier deposits. A withdrawal that
+ * would take the running total below zero is treated as taking out stock from
+ * before this log window, so a later re-insert still counts as 1 in the chest.
+ *
+ * Trash is dropped here: it cannot be sold, traded, or salvaged, so it must
+ * never reach the listing, CSV, or market API.
  */
 export function aggregateRows(rows: ParsedRow[]): AggregatedEntry[] {
-  const stacks = new Map<string, AggregatedEntry>();
+  const groups = new Map<string, ParsedRow[]>();
 
   for (const row of rows) {
-    const key = `${row.item.replace(/\s+/g, " ").trim().toLowerCase()}|${row.enchantment}|${row.quality}`;
-    const existing = stacks.get(key);
-    if (existing) {
-      existing.amount += row.amount;
-      existing.lines.push(row.line);
-      if (row.player && !existing.players.includes(row.player)) {
-        existing.players.push(row.player);
-      }
-    } else {
-      stacks.set(key, {
-        name: row.item.replace(/\s+/g, " ").trim(),
-        enchantment: row.enchantment,
-        quality: row.quality,
-        amount: row.amount,
-        players: row.player ? [row.player] : [],
-        lines: [row.line],
-      });
-    }
+    if (isTrash(row.item)) continue;
+    const key = stackKey(row);
+    const existing = groups.get(key);
+    if (existing) existing.push(row);
+    else groups.set(key, [row]);
   }
 
-  return [...stacks.values()];
+  const stacks: AggregatedEntry[] = [];
+  for (const group of groups.values()) {
+    let amount = 0;
+    for (const row of [...group].sort(compareChestRows)) {
+      amount = Math.max(0, amount + row.amount);
+    }
+    if (amount <= 0) continue;
+
+    const first = group[0];
+    const players: string[] = [];
+    for (const row of group) {
+      if (row.player && !players.includes(row.player)) players.push(row.player);
+    }
+    stacks.push({
+      name: first.item.replace(/\s+/g, " ").trim(),
+      enchantment: first.enchantment,
+      quality: first.quality,
+      amount,
+      players,
+      lines: group.map((row) => row.line),
+    });
+  }
+
+  return stacks;
 }

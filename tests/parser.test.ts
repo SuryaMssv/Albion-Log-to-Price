@@ -164,4 +164,45 @@ describe("aggregateRows", () => {
     expect(stacks).toHaveLength(1);
     expect(stacks[0].amount).toBe(3);
   });
+
+  it("nets a remove-then-reinsert to quantity 1, not 2", () => {
+    // Newest-first chest copy: take the cape out (-1), then put it back (+1).
+    // The withdrawal must cancel, not be dropped (which would count the cape twice)
+    // and must not wipe a later re-insert that sits above it in the paste.
+    const log = [
+      '"Date"\t"Player"\t"Item"\t"Enchantment"\t"Quality"\t"Amount"',
+      '"08/19/2026 21:57:39"\t"DemiG0Dz"\t"Adept\'s Avalonian Cape"\t"2"\t"1"\t"1"',
+      '"08/19/2026 21:56:07"\t"DemiG0Dz"\t"Major Sticky Potion"\t"0"\t"1"\t"1"',
+      '"08/19/2026 21:56:07"\t"DemiG0Dz"\t"Adept\'s Avalonian Cape"\t"2"\t"1"\t"-1"',
+    ].join("\n");
+    const parsed = parseChestLog(log);
+    expect(parsed.errors).toHaveLength(0);
+    expect(parsed.rows.map((row) => row.amount)).toEqual([1, 1, -1]);
+
+    const stacks = aggregateRows(parsed.rows);
+    const cape = stacks.find((stack) => stack.name === "Adept's Avalonian Cape");
+    const potion = stacks.find((stack) => stack.name === "Major Sticky Potion");
+    expect(cape?.amount).toBe(1);
+    expect(potion?.amount).toBe(1);
+  });
+
+  it("drops a stack that was fully withdrawn", () => {
+    const log = [
+      '"08/19/2026 21:55:00" "P" "Adept\'s Avalonian Cape" "2" "1" "1"',
+      '"08/19/2026 21:56:00" "P" "Adept\'s Avalonian Cape" "2" "1" "-1"',
+    ].join("\n");
+    const stacks = aggregateRows(parseChestLog(log).rows);
+    expect(stacks).toHaveLength(0);
+  });
+
+  it("omits trash so it is never listed or priced", () => {
+    const log = [
+      '"08/19/2026 21:56:01" "lxlFactor" "Trash" "0" "1" "1"',
+      '"08/19/2026 21:56:07" "DemiG0Dz" "Major Sticky Potion" "0" "1" "1"',
+      '"08/19/2026 21:56:08" "lxlFactor" "TRASH" "0" "1" "2"',
+    ].join("\n");
+    const stacks = aggregateRows(parseChestLog(log).rows);
+    expect(stacks).toHaveLength(1);
+    expect(stacks[0].name).toBe("Major Sticky Potion");
+  });
 });

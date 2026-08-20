@@ -345,6 +345,28 @@ describe("output formats", () => {
       "Adept's Fiend Cowl,2,4,1,900000,900000,Caerleon,2026-08-18T10:00:00,Sell order,Priced",
     );
   });
+
+  it("keeps trash out of the CSV and does not fetch a market price for it", async () => {
+    const fetcher = vi.fn(fakeMarket);
+    const result = await calculateLootSplit(
+      {
+        log: `${SAMPLE}\n"08/19/2026 21:56:01" "lxlFactor" "Trash" "0" "1" "1"`,
+        server: "east",
+        city: "Caerleon",
+        priceBasis: "sell_min",
+        participants: 5,
+      },
+      fetcher,
+    );
+
+    expect(result.items.some((item) => /^trash$/i.test(item.name))).toBe(false);
+    expect(result.unresolvedItems.some((item) => /^trash$/i.test(item.name))).toBe(false);
+    expect(result.missingPrices.some((item) => /^trash$/i.test(item.name))).toBe(false);
+    expect(buildCsv(result)).not.toMatch(/Trash/i);
+
+    const requested = fetcher.mock.calls.map((call) => String(call[0])).join(" ");
+    expect(requested).not.toMatch(/TRASH/i);
+  });
 });
 
 describe("discord source notes", () => {
