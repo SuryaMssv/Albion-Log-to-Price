@@ -1,8 +1,22 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import LogInput from "./LogInput";
 import ResultsPanel from "./ResultsPanel";
+import { useHistory } from "./HistoryContext";
+import { applyDeductions } from "@/lib/deductions";
+import { buildExportJson, downloadJson } from "@/lib/export";
+import {
+  isParticipantDraft,
+  isPercentDraft,
+  isSilverDraft,
+  MAX_REPAIR_COST,
+  parseParticipantsField,
+  parsePercentField,
+  parseSilverField,
+} from "@/lib/fields";
+import { newHistoryId, snapshotFromResult } from "@/lib/history";
+import { applyManualPrices } from "@/lib/overrides";
 import {
   CITIES,
   PRICE_BASES,
@@ -13,50 +27,10 @@ import {
   type ServerId,
 } from "@/lib/types";
 
-const MAX_PARTICIPANTS = 100;
-const MAX_REPAIR_COST = 1_000_000_000_000;
-const MAX_TAX_PERCENT = 100;
-
-function parseSilverField(raw: string): number {
-  if (raw.trim() === "") return 0;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0) return 0;
-  return Math.min(MAX_REPAIR_COST, Math.trunc(value));
-}
-
-function parsePercentField(raw: string): number {
-  if (raw.trim() === "" || raw === ".") return 0;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0) return 0;
-  return Math.min(MAX_TAX_PERCENT, value);
-}
-
-function isSilverDraft(raw: string): boolean {
-  return raw === "" || /^\d+$/.test(raw);
-}
-
-function isPercentDraft(raw: string): boolean {
-  if (raw === "" || raw === ".") return true;
-  if (!/^\d{0,3}(\.\d{0,4})?$/.test(raw)) return false;
-  const value = Number(raw);
-  return Number.isFinite(value) && value <= MAX_TAX_PERCENT;
-}
-
-function parseParticipantsField(raw: string): number {
-  if (raw.trim() === "") return 0;
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 1) return 0;
-  return Math.min(MAX_PARTICIPANTS, Math.trunc(value));
-}
-
-function isParticipantDraft(raw: string): boolean {
-  if (raw === "") return true;
-  if (!/^\d+$/.test(raw)) return false;
-  const value = Number(raw);
-  return value <= MAX_PARTICIPANTS;
-}
+const SAVE_DEBOUNCE_MS = 500;
 
 export default function LootCalculator() {
+  const { upsert, registerRestore } = useHistory();
   const [log, setLog] = useState("");
   const [server, setServer] = useState<ServerId>("east");
   const [city, setCity] = useState<City | "">("");
@@ -69,9 +43,36 @@ export default function LootCalculator() {
   const [useNames, setUseNames] = useState(false);
   const [names, setNames] = useState<string[]>([]);
   const [result, setResult] = useState<CalculationResult | null>(null);
+  const [overrides, setOverrides] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const entryIdRef = useRef<string | null>(null);
+  const lastLogRef = useRef("");
+  const skipNextSave = useRef(false);
+
+  useEffect(() => {
+    return registerRestore((entry) => {
+      if (entry.source !== "chest-log") return;
+      skipNextSave.current = true;
+      setLog(entry.inputs.log);
+      setServer(entry.inputs.server);
+      setCity(entry.inputs.city);
+      setPriceBasis(entry.inputs.priceBasis);
+      setParticipants(entry.inputs.participants);
+      setRepairCost(entry.inputs.repairCost);
+      setSellerTax(entry.inputs.sellerTax);
+      setGuildTax(entry.inputs.guildTax);
+      setPremium(entry.inputs.premium);
+      setUseNames(entry.inputs.useNames);
+      setNames(entry.inputs.names);
+      setResult(entry.result);
+      setOverrides(entry.overrides);
+      setError(null);
+      entryIdRef.current = entry.id;
+      lastLogRef.current = entry.inputs.log;
+    });
+  }, [registerRestore]);
 
   const deductions = useMemo(
     () => ({
@@ -83,6 +84,61 @@ export default function LootCalculator() {
     [repairCost, sellerTax, guildTax, premium],
   );
   const participantCount = parseParticipantsField(participants);
+
+  const persist = useCallback(
+    (payload: CalculationResult, currentOverrides: Record<string, number>, asNew: boolean) => {
+      if (city === "") return;
+      if (asNew || !entryIdRef.current) entryIdRef.current = newHistoryId();
+      lastLogRef.current = log;
+      const displayed = applyDeductions(applyManualPrices(payload, currentOverrides), deductions);
+      upsert({
+        id: entryIdRef.current,
+        savedAt: new Date().toISOString(),
+        source: "chest-log",
+        inputs: {
+          log,
+          server,
+          city,
+          priceBasis,
+          participants,
+          useNames,
+          names,
+          repairCost,
+          sellerTax,
+          guildTax,
+          premium,
+        },
+        overrides: currentOverrides,
+        result: payload,
+        snapshot: snapshotFromResult(displayed),
+      });
+    },
+    [
+      city,
+      deductions,
+      guildTax,
+      log,
+      names,
+      participants,
+      premium,
+      priceBasis,
+      repairCost,
+      sellerTax,
+      server,
+      upsert,
+      useNames,
+    ],
+  );
+
+  useEffect(() => {
+    if (!result || !entryIdRef.current || city === "") return;
+    if (skipNextSave.current) {
+      skipNextSave.current = false;
+      return;
+    }
+    const timer = window.setTimeout(() => persist(result, overrides, false), SAVE_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [result, overrides, persist, city]);
 
   const calculate = useCallback(async () => {
     if (log.trim() === "") {
@@ -122,7 +178,9 @@ export default function LootCalculator() {
         setResult(null);
         return;
       }
-      setResult(payload as CalculationResult);
+      const next = payload as CalculationResult;
+      setResult(next);
+      persist(next, overrides, !entryIdRef.current || lastLogRef.current !== log);
       requestAnimationFrame(() => {
         resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
@@ -132,7 +190,7 @@ export default function LootCalculator() {
     } finally {
       setBusy(false);
     }
-  }, [log, server, city, priceBasis, participantCount, deductions, useNames, names]);
+  }, [log, server, city, priceBasis, participantCount, deductions, useNames, names, persist, overrides]);
 
   function clearAll() {
     setLog("");
@@ -143,6 +201,9 @@ export default function LootCalculator() {
     setSellerTax("");
     setGuildTax("");
     setPremium(true);
+    setOverrides({});
+    entryIdRef.current = null;
+    lastLogRef.current = "";
   }
 
   function updateName(index: number, value: string) {
@@ -151,6 +212,45 @@ export default function LootCalculator() {
       next[index] = value;
       return next;
     });
+  }
+
+  function updateOverride(key: string, value: number | null) {
+    setOverrides((previous) => {
+      const next = { ...previous };
+      if (value === null) delete next[key];
+      else next[key] = value;
+      return next;
+    });
+  }
+
+  function exportJson() {
+    if (!result || city === "") return;
+    persist(result, overrides, false);
+    const displayed = applyDeductions(applyManualPrices(result, overrides), deductions);
+    downloadJson(
+      `albion-loot-${displayed.stats.calculatedAt.slice(0, 10)}.json`,
+      buildExportJson({
+        id: entryIdRef.current ?? newHistoryId(),
+        savedAt: new Date().toISOString(),
+        source: "chest-log",
+        inputs: {
+          log,
+          server,
+          city,
+          priceBasis,
+          participants,
+          useNames,
+          names,
+          repairCost,
+          sellerTax,
+          guildTax,
+          premium,
+        },
+        overrides,
+        result,
+        snapshot: snapshotFromResult(displayed),
+      }),
+    );
   }
 
   return (
@@ -381,6 +481,9 @@ export default function LootCalculator() {
           <ResultsPanel
             result={result}
             deductions={deductions}
+            overrides={overrides}
+            onOverrideChange={updateOverride}
+            onExportJson={exportJson}
             onRetryPrices={calculate}
             busy={busy}
           />

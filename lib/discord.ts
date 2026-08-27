@@ -1,14 +1,26 @@
-import { hasDeductions } from "./deductions";
+import { hasDeductions, type ManualSplit } from "./deductions";
 import { formatPercent, formatSilver } from "./format";
-import { PRICE_BASES, SERVERS, type CalculationResult } from "./types";
+import { PRICE_BASES, SERVERS, type CalculationResult, type ParticipantShare } from "./types";
 
-/**
- * Discord-ready summary (FR-17, PRD §22). Deliberately compact: the item breakdown
- * stays in the app, but anything excluded from the total is called out so the split
- * is never quietly wrong.
- */
-export function buildDiscordMessage(result: CalculationResult): string {
-  const lines: string[] = ["⚔️ **GANK LOOT SPLIT**", ""];
+export interface DiscordSplitSummary {
+  totalValue: number;
+  netValue: number;
+  repairCost: number;
+  sellerTaxPercent: number;
+  guildTaxPercent: number;
+  marketSetupPercent: number;
+  marketTaxPercent: number;
+  sellerFee: number;
+  guildFee: number;
+  marketFee: number;
+  participants: number;
+  share: number;
+  remainder: number;
+  participantShares: ParticipantShare[];
+}
+
+function buildSplitLines(result: DiscordSplitSummary): string[] {
+  const lines: string[] = [];
 
   if (hasDeductions(result)) {
     lines.push(`💰 Gross Value: **${formatSilver(result.totalValue)}**`);
@@ -27,9 +39,7 @@ export function buildDiscordMessage(result: CalculationResult): string {
     }
     if (result.marketFee > 0) {
       const total = result.marketSetupPercent + result.marketTaxPercent;
-      lines.push(
-        `📉 Market (${formatPercent(total)}%): −${formatSilver(result.marketFee)}`,
-      );
+      lines.push(`📉 Market (${formatPercent(total)}%): −${formatSilver(result.marketFee)}`);
     }
     lines.push(`💰 Net Value: **${formatSilver(result.netValue)}**`);
   } else {
@@ -49,6 +59,17 @@ export function buildDiscordMessage(result: CalculationResult): string {
   for (const participant of result.participantShares) {
     lines.push(`• ${participant.name} — ${formatSilver(participant.share)}`);
   }
+
+  return lines;
+}
+
+/**
+ * Discord-ready summary (FR-17, PRD §22). Deliberately compact: the item breakdown
+ * stays in the app, but anything excluded from the total is called out so the split
+ * is never quietly wrong.
+ */
+export function buildDiscordMessage(result: CalculationResult): string {
+  const lines: string[] = ["⚔️ **GANK LOOT SPLIT**", "", ...buildSplitLines(result)];
 
   const excluded = result.unresolvedItems.length + result.missingPrices.length;
   if (excluded > 0) {
@@ -75,4 +96,9 @@ export function buildDiscordMessage(result: CalculationResult): string {
   );
 
   return lines.join("\n");
+}
+
+/** Split summary for typed-in totals — no market city or item notes. */
+export function buildManualDiscordMessage(result: ManualSplit | DiscordSplitSummary): string {
+  return ["⚔️ **GANK LOOT SPLIT**", "", ...buildSplitLines(result)].join("\n");
 }

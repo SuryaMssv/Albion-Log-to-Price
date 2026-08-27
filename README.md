@@ -31,7 +31,7 @@ Click **Load sample** to try the flow with the chest log from the PRD.
 
 Next.js App Router. The UI is a client component; the whole pipeline runs server-side
 in one route handler, so no chest-log data reaches a third party except the market
-price lookup itself. Nothing is stored — logs live only for the duration of the request.
+price lookup itself. Splits are saved in this browser only — the calculate API does not store logs.
 
 ```
 app/
@@ -50,7 +50,7 @@ lib/
   calculator.ts            Valuation, total, equal split
   overrides.ts             Folds manually entered prices back into a result
   calculate.ts             Pipeline orchestration + input validation
-  discord.ts / csv.ts      Output formats
+  discord.ts / export.ts   Discord copy and JSON export
 data/item-index.json       Generated item metadata (5,337 display names)
 scripts/build-item-index.mjs
 tests/                     Parser, resolver, calculator, market, pipeline, overrides, rate limit

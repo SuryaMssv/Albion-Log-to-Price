@@ -1,5 +1,5 @@
 import { buildParticipantShares, computeSplit } from "./calculator";
-import type { CalculationResult } from "./types";
+import type { CalculationResult, ParticipantShare } from "./types";
 
 export interface DeductionsInput {
   repairCost: number;
@@ -69,8 +69,41 @@ export function computeNet(gross: number, deductions: DeductionsInput): Deductio
   };
 }
 
+export interface ManualSplitInput extends DeductionsInput {
+  gross: number;
+  participants: number;
+  names?: string[];
+}
+
+export interface ManualSplit extends DeductionBreakdown {
+  totalValue: number;
+  participants: number;
+  share: number;
+  remainder: number;
+  participantShares: ParticipantShare[];
+}
+
+/** Gross, fees, and an even split — no chest log or market lookup. */
+export function computeManualSplit(input: ManualSplitInput): ManualSplit {
+  const breakdown = computeNet(input.gross, {
+    repairCost: input.repairCost,
+    sellerTaxPercent: input.sellerTaxPercent,
+    guildTaxPercent: input.guildTaxPercent,
+    premium: input.premium,
+  });
+  const { share, remainder } = computeSplit(breakdown.netValue, input.participants);
+  return {
+    totalValue: input.gross,
+    ...breakdown,
+    participants: input.participants,
+    share,
+    remainder,
+    participantShares: buildParticipantShares(input.participants, share, input.names),
+  };
+}
+
 /** True when selling fees or repair actually change the split. */
-export function hasDeductions(result: CalculationResult): boolean {
+export function hasDeductions(result: Pick<DeductionBreakdown, "repairCost" | "sellerFee" | "guildFee" | "marketFee">): boolean {
   return result.repairCost > 0 || result.sellerFee > 0 || result.guildFee > 0 || result.marketFee > 0;
 }
 

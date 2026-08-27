@@ -38,3 +38,32 @@ export function enchantmentLabel(enchantment: number): string {
 export function formatPercent(value: number): string {
   return Number.parseFloat(value.toPrecision(12)).toString();
 }
+
+/** One-line fee list under Net Distributable. */
+export function formatNetBreakdown(result: {
+  repairCost: number;
+  sellerFee: number;
+  sellerTaxPercent: number;
+  guildFee: number;
+  guildTaxPercent: number;
+  marketFee: number;
+  marketSetupPercent: number;
+  marketTaxPercent: number;
+}): string {
+  const parts: string[] = [];
+  if (result.repairCost > 0) parts.push(`−${formatSilver(result.repairCost)} repair`);
+  if (result.sellerFee > 0) {
+    parts.push(
+      `−${formatPercent(result.sellerTaxPercent)}% seller buffer (${formatSilver(result.sellerFee)})`,
+    );
+  }
+  if (result.guildFee > 0) {
+    parts.push(`−${formatPercent(result.guildTaxPercent)}% guild (${formatSilver(result.guildFee)})`);
+  }
+  if (result.marketFee > 0) {
+    const total = result.marketSetupPercent + result.marketTaxPercent;
+    parts.push(`−${formatPercent(total)}% market (${formatSilver(result.marketFee)})`);
+  }
+  if (parts.length === 0) return "No repair or selling fees";
+  return parts.join(" · ");
+}

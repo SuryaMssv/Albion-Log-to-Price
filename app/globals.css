@@ -34,6 +34,13 @@
   --font-mono: var(--font-geist-mono);
 }
 
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   background:
     radial-gradient(120% 80% at 50% 0%, #1c1b16 0%, var(--background) 60%);

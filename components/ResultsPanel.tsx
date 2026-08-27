@@ -6,13 +6,15 @@ import IssuesPanel from "./IssuesPanel";
 import { applyDeductions, type DeductionsInput } from "@/lib/deductions";
 import { applyManualPrices } from "@/lib/overrides";
 import { buildDiscordMessage } from "@/lib/discord";
-import { buildCsv } from "@/lib/csv";
-import { formatCompact, formatPercent, formatSilver } from "@/lib/format";
+import { formatCompact, formatNetBreakdown, formatSilver } from "@/lib/format";
 import { PRICE_BASES, SERVERS, type CalculationResult } from "@/lib/types";
 
 interface ResultsPanelProps {
   result: CalculationResult;
   deductions: DeductionsInput;
+  overrides: Record<string, number>;
+  onOverrideChange: (key: string, value: number | null) => void;
+  onExportJson: () => void;
   onRetryPrices: () => void;
   busy: boolean;
 }
@@ -30,26 +32,19 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 export default function ResultsPanel({
   result: rawResult,
   deductions,
+  overrides,
+  onOverrideChange,
+  onExportJson,
   onRetryPrices,
   busy,
 }: ResultsPanelProps) {
   const [copied, setCopied] = useState(false);
-  const [overrides, setOverrides] = useState<Record<string, number>>({});
 
   // Manual prices then deductions: both are pure, so tax/repair edits do not refetch.
   const result = useMemo(
     () => applyDeductions(applyManualPrices(rawResult, overrides), deductions),
     [rawResult, overrides, deductions],
   );
-
-  function updateOverride(key: string, value: number | null) {
-    setOverrides((previous) => {
-      const next = { ...previous };
-      if (value === null) delete next[key];
-      else next[key] = value;
-      return next;
-    });
-  }
 
   async function copyDiscord() {
     const message = buildDiscordMessage(result);
@@ -66,16 +61,6 @@ export default function ResultsPanel({
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }
-
-  function exportCsv() {
-    const blob = new Blob([buildCsv(result)], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `albion-loot-${result.stats.calculatedAt.slice(0, 10)}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
   }
 
   const excluded = result.unresolvedItems.length + result.missingPrices.length;
@@ -102,7 +87,7 @@ export default function ResultsPanel({
           <StatCard
             label="💰 Net Distributable"
             value={`${formatSilver(result.netValue)}`}
-            sub={netBreakdown(result)}
+            sub={formatNetBreakdown(result)}
           />
           <StatCard
             label="🪙 Each Player"
@@ -126,10 +111,10 @@ export default function ResultsPanel({
         </button>
         <button
           type="button"
-          onClick={exportCsv}
+          onClick={onExportJson}
           className="min-h-11 flex-1 rounded-lg border border-border-soft bg-surface-raised px-5 text-sm font-medium text-foreground transition-colors hover:border-gold-dim sm:flex-none"
         >
-          Export CSV
+          Export JSON
         </button>
       </div>
 
@@ -163,7 +148,7 @@ export default function ResultsPanel({
         <ItemTable
           items={result.items}
           overrides={overrides}
-          onOverrideChange={updateOverride}
+          onOverrideChange={onOverrideChange}
         />
       </section>
 
@@ -172,7 +157,7 @@ export default function ResultsPanel({
         onRetryPrices={onRetryPrices}
         busy={busy}
         overrides={overrides}
-        onOverrideChange={updateOverride}
+        onOverrideChange={onOverrideChange}
       />
 
       <p className="text-xs text-muted">
@@ -180,23 +165,4 @@ export default function ResultsPanel({
       </p>
     </div>
   );
-}
-
-function netBreakdown(result: CalculationResult): string {
-  const parts: string[] = [];
-  if (result.repairCost > 0) parts.push(`−${formatSilver(result.repairCost)} repair`);
-  if (result.sellerFee > 0) {
-    parts.push(
-      `−${formatPercent(result.sellerTaxPercent)}% seller buffer (${formatSilver(result.sellerFee)})`,
-    );
-  }
-  if (result.guildFee > 0) {
-    parts.push(`−${formatPercent(result.guildTaxPercent)}% guild (${formatSilver(result.guildFee)})`);
-  }
-  if (result.marketFee > 0) {
-    const total = result.marketSetupPercent + result.marketTaxPercent;
-    parts.push(`−${formatPercent(total)}% market (${formatSilver(result.marketFee)})`);
-  }
-  if (parts.length === 0) return "No repair or selling fees";
-  return parts.join(" · ");
 }

@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { calculateLootSplit, validateInput, ValidationError } from "@/lib/calculate";
 import { buildDiscordMessage } from "@/lib/discord";
-import { buildCsv } from "@/lib/csv";
+import { buildExportJson } from "@/lib/export";
+import { snapshotFromResult, type HistoryEntry } from "@/lib/history";
 import { applyManualPrices, overrideKey } from "@/lib/overrides";
 import type { Fetcher } from "@/lib/market";
 
@@ -327,25 +328,43 @@ describe("output formats", () => {
     expect(message).toContain("📊 Price: East — Caerleon lowest sell order");
   });
 
-  it("exports every stack to CSV, including the excluded ones", async () => {
+  it("exports the chest log, inputs, and every stack in JSON", async () => {
     const result = await calculateLootSplit(
       { log: SAMPLE, server: "east", city: "Caerleon", priceBasis: "sell_min", participants: 5 },
       fakeMarket,
     );
-    const rows = buildCsv(result).split("\n");
-
-    expect(rows[0]).toBe(
-      "Item,Enchantment,Quality,Amount,Unit Price,Total Value,Market,Price Date,Source,Status",
-    );
-    expect(rows).toHaveLength(6); // header + 3 priced + 1 unpriced + 1 unresolved
-    expect(rows.some((row) => row.includes("No market price"))).toBe(true);
-    expect(rows.some((row) => row.includes("Unresolved"))).toBe(true);
-    expect(rows[1]).toBe(
-      "Adept's Fiend Cowl,2,4,1,900000,900000,Caerleon,2026-08-18T10:00:00,Sell order,Priced",
-    );
+    const entry: HistoryEntry = {
+      id: "test",
+      savedAt: result.stats.calculatedAt,
+      source: "chest-log",
+      inputs: {
+        log: SAMPLE,
+        server: result.server,
+        city: result.city,
+        priceBasis: result.priceBasis,
+        participants: "5",
+        useNames: false,
+        names: [],
+        repairCost: "",
+        sellerTax: "",
+        guildTax: "",
+        premium: true,
+      },
+      overrides: {},
+      result,
+      snapshot: snapshotFromResult(result),
+    };
+    const parsed = JSON.parse(buildExportJson(entry)) as HistoryEntry;
+    expect(parsed.source).toBe("chest-log");
+    if (parsed.source !== "chest-log") throw new Error("expected chest-log");
+    expect(parsed.inputs.log).toContain("Adept's Fiend Cowl");
+    expect(parsed.result.items).toHaveLength(3);
+    expect(parsed.result.missingPrices).toHaveLength(1);
+    expect(parsed.result.unresolvedItems).toHaveLength(1);
+    expect(parsed.result.items[0]?.name).toBe("Adept's Fiend Cowl");
   });
 
-  it("keeps trash out of the CSV and does not fetch a market price for it", async () => {
+  it("keeps trash out of the priced export and does not fetch a market price for it", async () => {
     const fetcher = vi.fn(fakeMarket);
     const result = await calculateLootSplit(
       {
@@ -361,7 +380,6 @@ describe("output formats", () => {
     expect(result.items.some((item) => /^trash$/i.test(item.name))).toBe(false);
     expect(result.unresolvedItems.some((item) => /^trash$/i.test(item.name))).toBe(false);
     expect(result.missingPrices.some((item) => /^trash$/i.test(item.name))).toBe(false);
-    expect(buildCsv(result)).not.toMatch(/Trash/i);
 
     const requested = fetcher.mock.calls.map((call) => String(call[0])).join(" ");
     expect(requested).not.toMatch(/TRASH/i);
