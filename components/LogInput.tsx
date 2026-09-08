@@ -11,7 +11,10 @@ export const SAMPLE_LOG = `"Date" "Player" "Item" "Enchantment" "Quality" "Amoun
 "08/18/2026 11:49:49" "DemiG0Dz" "Adept's Dagger Pair" "2" "4" "1"
 "08/18/2026 11:49:49" "DemiG0Dz" "Adept's Assassin Jacket" "2" "4" "1"
 "08/18/2026 11:49:49" "DemiG0Dz" "Adept's Hellion Shoes" "2" "3" "1"
-"08/18/2026 11:49:48" "DemiG0Dz" "Invisibility Potion" "0" "1" "2"`;
+"08/18/2026 11:49:48" "DemiG0Dz" "Invisibility Potion" "0" "1" "2"
+"08/18/2026 12:15:02" "DemiG0Dz" "Adept's Bag" "1" "4" "1"
+"08/18/2026 12:15:01" "DemiG0Dz" "Adept's Cape" "2" "3" "1"
+"08/18/2026 12:15:00" "DemiG0Dz" "Invisibility Potion" "0" "1" "1"`;
 
 const ACCEPTED_EXTENSIONS = [".txt", ".csv", ".log"];
 const MAX_FILE_BYTES = 2 * 1024 * 1024;

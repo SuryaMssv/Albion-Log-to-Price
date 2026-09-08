@@ -37,7 +37,7 @@
 html,
 body {
   height: 100%;
-  overflow: hidden;
+  overflow: clip;
   overscroll-behavior: none;
 }
 

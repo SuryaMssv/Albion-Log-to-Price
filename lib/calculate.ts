@@ -3,7 +3,7 @@ import { runsFromLineGroups } from "./runs";
 import { resolveEntries } from "./resolver";
 import { fetchPrices, fetchSalesHistory, type Fetcher } from "./market";
 import { buildParticipantShares, computeSplit, priceEntries, totalValue } from "./calculator";
-import { computeNet, rollupRuns, type DeductionsInput } from "./deductions";
+import { rollupRuns, type DeductionsInput } from "./deductions";
 import type { CalculationResult, City, LootRunResult, PriceBasis, ServerId } from "./types";
 import { isCity, PRICE_BASES, SERVERS } from "./types";
 
@@ -232,15 +232,25 @@ export async function calculateLootSplit(
       participantNames: input.participantNames ?? [],
     };
     const total = totalValue(priced);
-    const breakdown = computeNet(total, deductions);
-    const { share, remainder } = computeSplit(breakdown.netValue, config.participants);
+    const { share, remainder } = computeSplit(total, config.participants);
     return [
       {
         index: entry.run.index,
         startedAt: entry.run.startedAt,
         endedAt: entry.run.endedAt,
         totalValue: total,
-        ...breakdown,
+        netValue: total,
+        repairCost: 0,
+        sellerTaxPercent: 0,
+        guildTaxPercent: 0,
+        premium: deductions.premium,
+        marketSetupPercent: 0,
+        marketTaxPercent: 0,
+        sellerFee: 0,
+        guildFee: 0,
+        marketSetupFee: 0,
+        marketTaxFee: 0,
+        marketFee: 0,
         participants: config.participants,
         share,
         remainder,

@@ -299,7 +299,7 @@ describe("calculateLootSplit", () => {
     expect(result.warnings.length).toBeGreaterThan(0);
   });
 
-  it("splits distant timestamps into runs and deducts full repair on each", async () => {
+  it("splits distant timestamps into runs and deducts repair once on the session", async () => {
     const log = [
       `"Date" "Player" "Item" "Enchantment" "Quality" "Amount"`,
       `"08/18/2026 11:49:51" "A" "Adept's Fiend Cowl" "2" "4" "1"`,
@@ -314,8 +314,8 @@ describe("calculateLootSplit", () => {
         participants: 5,
         repairCost: 1_000,
         runs: [
-          { participants: 2, participantNames: ["Ada"] },
-          { participants: 3, participantNames: [] },
+          { participants: 2, participantNames: ["Ada", "Bo"] },
+          { participants: 2, participantNames: ["Ada", "Cy"] },
         ],
       },
       fakeMarket,
@@ -324,15 +324,21 @@ describe("calculateLootSplit", () => {
     expect(result.runs).toHaveLength(2);
     const [firstRun, secondRun] = result.runs ?? [];
     expect(firstRun?.totalValue).toBe(900_000);
-    expect(firstRun?.repairCost).toBe(1_000);
+    expect(firstRun?.repairCost).toBe(0);
     expect(firstRun?.participants).toBe(2);
     expect(firstRun?.participantShares[0].name).toBe("Ada");
     expect(secondRun?.totalValue).toBe(100_000);
-    expect(secondRun?.repairCost).toBe(1_000);
-    expect(secondRun?.participants).toBe(3);
+    expect(secondRun?.repairCost).toBe(0);
+    expect(secondRun?.participants).toBe(2);
     expect(result.totalValue).toBe(1_000_000);
-    expect(result.netValue).toBe((firstRun?.netValue ?? 0) + (secondRun?.netValue ?? 0));
-    expect(result.netValue).toBeLessThan(result.totalValue - 1_000);
+    expect(result.repairCost).toBe(1_000);
+    expect(result.marketFee).toBe(65_000);
+    expect(result.netValue).toBe(934_000);
+    expect(result.participantShares).toEqual([
+      { name: "Ada", share: 467_000 },
+      { name: "Bo", share: 420_300 },
+      { name: "Cy", share: 46_700 },
+    ]);
   });
 });
 
@@ -364,7 +370,7 @@ describe("output formats", () => {
     expect(message).toContain("📊 Price: East — Caerleon lowest sell order");
   });
 
-  it("lists every run in one Discord message", async () => {
+  it("posts one combined split, adding the same name across runs", async () => {
     const log = [
       `"Date" "Player" "Item" "Enchantment" "Quality" "Amount"`,
       `"08/18/2026 11:49:51" "A" "Adept's Fiend Cowl" "2" "4" "1"`,
@@ -379,17 +385,23 @@ describe("output formats", () => {
         participants: 5,
         runs: [
           { participants: 2, participantNames: ["Ada"] },
-          { participants: 3, participantNames: [] },
+          { participants: 3, participantNames: ["Ada", "Bo"] },
         ],
       },
       fakeMarket,
     );
     const message = buildDiscordMessage(result);
-    expect(message).toContain("💰 Session Gross:");
-    expect(message).toContain("**Run 1 · 18/Aug/26 11:49 am [5:19 pm]**");
-    expect(message).toContain("**Run 2 · 18/Aug/26 2:00 pm [7:30 pm]**");
+    const [firstRun, secondRun] = result.runs ?? [];
+    expect(message).toContain("💰 Gross Value:");
+    expect(message).not.toContain("Session Gross");
+    expect(message).not.toContain("**Run 1");
     expect(message).toContain("• Ada —");
+    expect(message).toContain("• Bo —");
     expect(message).toContain("📊 Price: East — Caerleon lowest sell order");
+    const ada = result.participantShares.find((participant) => participant.name === "Ada")?.share ?? 0;
+    const bo = result.participantShares.find((participant) => participant.name === "Bo")?.share ?? 0;
+    expect(ada).toBeGreaterThan(bo);
+    expect(ada).toBeLessThan((firstRun?.share ?? 0) + (secondRun?.share ?? 0));
   });
 
   it("exports the chest log, inputs, and every stack in JSON", async () => {

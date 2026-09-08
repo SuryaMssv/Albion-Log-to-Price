@@ -19,6 +19,10 @@ export interface DiscordSplitSummary {
   participantShares: ParticipantShare[];
 }
 
+function evenShares(shares: ParticipantShare[]): boolean {
+  return shares.length > 0 && shares.every((participant) => participant.share === shares[0].share);
+}
+
 function buildSplitLines(result: DiscordSplitSummary): string[] {
   const lines: string[] = [];
 
@@ -46,10 +50,10 @@ function buildSplitLines(result: DiscordSplitSummary): string[] {
     lines.push(`💰 Total Value: **${formatSilver(result.totalValue)}**`);
   }
 
-  lines.push(
-    `👥 Participants: **${result.participants}**`,
-    `🪙 Each: **${formatSilver(result.share)}**`,
-  );
+  lines.push(`👥 Participants: **${result.participants}**`);
+  if (evenShares(result.participantShares)) {
+    lines.push(`🪙 Each: **${formatSilver(result.share)}**`);
+  }
 
   if (result.remainder > 0) {
     lines.push(`↩️ Remainder: ${formatSilver(result.remainder)} silver`);
@@ -70,17 +74,8 @@ function buildSplitLines(result: DiscordSplitSummary): string[] {
  */
 export function buildDiscordMessage(result: CalculationResult): string {
   const lines: string[] = ["⚔️ **GANK LOOT SPLIT**", ""];
-  const runs = result.runs ?? [];
 
-  if (runs.length > 1) {
-    lines.push(`💰 Session Gross: **${formatSilver(result.totalValue)}**`);
-    lines.push(`💰 Session Net: **${formatSilver(result.netValue)}**`, "");
-    for (const run of runs) {
-      lines.push(`**${runHeading(run)}**`, "", ...buildSplitLines(run), "");
-    }
-  } else {
-    lines.push(...buildSplitLines(result));
-  }
+  lines.push(...buildSplitLines(result));
 
   const excluded = result.unresolvedItems.length + result.missingPrices.length;
   if (excluded > 0) {

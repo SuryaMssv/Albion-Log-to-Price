@@ -148,6 +148,53 @@ describe("applyDeductions", () => {
     const deducted = applyDeductions(result(), { repairCost: 0, sellerTaxPercent: 0, guildTaxPercent: 0, premium: true });
     expect(applyDeductions(deducted, { repairCost: 0, sellerTaxPercent: 0, guildTaxPercent: 0, premium: true })).toBe(deducted);
   });
+
+  it("takes repair and selling fees once on a multi-run session", () => {
+    const run = (
+      index: number,
+      totalValue: number,
+      names: string[],
+    ): NonNullable<CalculationResult["runs"]>[number] => ({
+      index,
+      startedAt: "2026-08-18T11:00:00",
+      endedAt: "2026-08-18T11:00:00",
+      totalValue,
+      netValue: totalValue,
+      repairCost: 0,
+      sellerTaxPercent: 0,
+      guildTaxPercent: 0,
+      premium: true,
+      marketSetupPercent: 0,
+      marketTaxPercent: 0,
+      sellerFee: 0,
+      guildFee: 0,
+      marketSetupFee: 0,
+      marketTaxFee: 0,
+      marketFee: 0,
+      participants: names.length,
+      share: Math.floor(totalValue / names.length),
+      remainder: totalValue % names.length,
+      participantShares: names.map((name) => ({ name, share: Math.floor(totalValue / names.length) })),
+      items: [],
+      unresolvedItems: [],
+      missingPrices: [],
+    });
+    const updated = applyDeductions(
+      result({
+        runs: [run(1, 900_000, ["Ada", "Bo"]), run(2, 100_000, ["Ada", "Cy"])],
+      }),
+      { repairCost: 1_000, sellerTaxPercent: 0, guildTaxPercent: 0, premium: true },
+    );
+    expect(updated.repairCost).toBe(1_000);
+    expect(updated.marketFee).toBe(65_000);
+    expect(updated.netValue).toBe(934_000);
+    expect(updated.runs?.every((entry) => entry.repairCost === 0 && entry.marketFee === 0)).toBe(true);
+    expect(updated.participantShares).toEqual([
+      { name: "Ada", share: 467_000 },
+      { name: "Bo", share: 420_300 },
+      { name: "Cy", share: 46_700 },
+    ]);
+  });
 });
 
 describe("Discord deductions", () => {

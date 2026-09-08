@@ -3,9 +3,9 @@
 import { useMemo, useState } from "react";
 import { applyDeductions, type DeductionsInput } from "@/lib/deductions";
 import { applyManualPrices } from "@/lib/overrides";
-import { buildDiscordMessage, runHeading } from "@/lib/discord";
+import { buildDiscordMessage } from "@/lib/discord";
 import { formatCompact, formatNetBreakdown, formatSilver } from "@/lib/format";
-import { PRICE_BASES, SERVERS, type CalculationResult, type LootRunResult } from "@/lib/types";
+import { PRICE_BASES, SERVERS, type CalculationResult, type ParticipantShare } from "@/lib/types";
 import IssuesPanel from "./IssuesPanel";
 
 interface ResultsPanelProps {
@@ -59,11 +59,12 @@ export default function ResultsPanel({
   }
 
   const runs = result.runs ?? [];
-  const multiRun = runs.length > 1;
   const excluded = result.unresolvedItems.length + result.missingPrices.length;
   const manualCount = result.items.filter((item) => item.source === "manual").length;
   const saleCount = result.items.filter((item) => item.source === "recent_sale").length;
-
+  const shares = result.participantShares;
+  const even =
+    shares.length > 0 && shares.every((participant) => participant.share === shares[0].share);
   return (
     <div className="flex flex-col gap-3">
       <div>
@@ -84,17 +85,17 @@ export default function ResultsPanel({
           <StatCard
             label="💰 Net Distributable"
             value={`${formatSilver(result.netValue)}`}
-            sub={multiRun ? `${runs.length} runs · full repair on each` : formatNetBreakdown(result)}
+            sub={formatNetBreakdown(result)}
           />
           <StatCard
-            label={multiRun ? "⚔️ Runs" : "🪙 Each Player"}
-            value={multiRun ? String(runs.length) : `${formatSilver(result.share)}`}
+            label={even ? "🪙 Each Player" : "👥 Players"}
+            value={even ? `${formatSilver(result.share)}` : String(shares.length)}
             sub={
-              multiRun
-                ? "Split separately"
-                : result.remainder > 0
-                  ? `${formatSilver(result.remainder)} silver remainder`
-                  : "Divides evenly"
+              result.remainder > 0
+                ? `${formatSilver(result.remainder)} silver remainder`
+                : even
+                  ? "Divides evenly"
+                  : "Named players across every run"
             }
           />
         </div>
@@ -124,22 +125,22 @@ export default function ResultsPanel({
         {excluded > 0 && ` · ${excluded} excluded`} · market lookup {result.stats.marketMs} ms
       </p>
 
-      {multiRun
-        ? runs.map((run) => <RunShares key={run.index} run={run} />)
-        : <ShareList shares={result.participantShares} />}
+      <ShareList shares={shares} />
 
       <IssuesPanel result={result} onRetryPrices={onRetryPrices} busy={busy} />
 
       <p className="text-[11px] text-muted">
         Net is gross minus repair, seller buffer tax, guild tax, market setup and market tax.
-        {multiRun ? " Repair is deducted in full from every run." : ""} Item tables live with each run
-        above.
+        {runs.length > 1
+          ? " Fees come off the session once. Each run splits among its own names, then the same name is added up."
+          : ""}{" "}
+        Item tables live with each run above.
       </p>
     </div>
   );
 }
 
-function ShareList({ shares }: { shares: LootRunResult["participantShares"] }) {
+function ShareList({ shares }: { shares: ParticipantShare[] }) {
   return (
     <section>
       <h3 className="mb-1.5 text-xs font-semibold text-foreground">Participant shares</h3>
@@ -156,28 +157,6 @@ function ShareList({ shares }: { shares: LootRunResult["participantShares"] }) {
           </li>
         ))}
       </ul>
-    </section>
-  );
-}
-
-function RunShares({ run }: { run: LootRunResult }) {
-  return (
-    <section className="rounded-lg border border-border-soft bg-surface/60 p-3">
-      <h3 className="text-xs font-semibold text-foreground">{runHeading(run)}</h3>
-      <div className="mt-2 grid gap-2 sm:grid-cols-3">
-        <StatCard label="💰 Gross" value={formatSilver(run.totalValue)} />
-        <StatCard label="💰 Net" value={formatSilver(run.netValue)} sub={formatNetBreakdown(run)} />
-        <StatCard
-          label="🪙 Each"
-          value={formatSilver(run.share)}
-          sub={
-            run.remainder > 0 ? `${formatSilver(run.remainder)} silver remainder` : "Divides evenly"
-          }
-        />
-      </div>
-      <div className="mt-2">
-        <ShareList shares={run.participantShares} />
-      </div>
     </section>
   );
 }

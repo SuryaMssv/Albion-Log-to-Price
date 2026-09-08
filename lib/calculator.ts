@@ -232,3 +232,42 @@ export function buildParticipantShares(
     share,
   }));
 }
+
+/** Same trimmed name across runs is one person — add their per-run shares. */
+export function combineParticipantShares(
+  runs: { participantShares: ParticipantShare[] }[],
+): ParticipantShare[] {
+  const totals = new Map<string, number>();
+  const order: string[] = [];
+  for (const run of runs) {
+    for (const participant of run.participantShares) {
+      const name = participant.name.trim() || participant.name;
+      if (!totals.has(name)) order.push(name);
+      totals.set(name, (totals.get(name) ?? 0) + participant.share);
+    }
+  }
+  return order.map((name) => ({ name, share: totals.get(name) ?? 0 }));
+}
+
+/**
+ * Scale each person's claim of the loot down to session net. Leftover whole
+ * silver from flooring stays as remainder rather than being given to one player.
+ */
+export function scaleSharesToNet(
+  net: number,
+  claims: ParticipantShare[],
+): { shares: ParticipantShare[]; remainder: number } {
+  const totalClaim = claims.reduce((sum, participant) => sum + participant.share, 0);
+  if (claims.length === 0 || totalClaim <= 0) {
+    return {
+      shares: claims.map((participant) => ({ ...participant, share: 0 })),
+      remainder: net,
+    };
+  }
+  const shares = claims.map((participant) => ({
+    name: participant.name,
+    share: Math.floor((net * participant.share) / totalClaim),
+  }));
+  const remainder = net - shares.reduce((sum, participant) => sum + participant.share, 0);
+  return { shares, remainder };
+}

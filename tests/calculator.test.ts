@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   buildParticipantShares,
+  combineParticipantShares,
   computeSplit,
   itemValue,
   priceEntries,
+  scaleSharesToNet,
   totalValue,
 } from "@/lib/calculator";
 import { quoteKey, type MarketLookup } from "@/lib/market";
@@ -89,6 +91,59 @@ describe("buildParticipantShares", () => {
       { name: "Player 2", share: 100 },
       { name: "Bo", share: 100 },
     ]);
+  });
+});
+
+describe("combineParticipantShares", () => {
+  it("adds the same name across runs and keeps first-seen order", () => {
+    expect(
+      combineParticipantShares([
+        {
+          participantShares: [
+            { name: "Ada", share: 400 },
+            { name: "Bo", share: 400 },
+          ],
+        },
+        {
+          participantShares: [
+            { name: "Ada", share: 250 },
+            { name: "Cy", share: 250 },
+          ],
+        },
+      ]),
+    ).toEqual([
+      { name: "Ada", share: 650 },
+      { name: "Bo", share: 400 },
+      { name: "Cy", share: 250 },
+    ]);
+  });
+});
+
+describe("scaleSharesToNet", () => {
+  it("keeps each person's cut of the loot when session fees come off the total", () => {
+    expect(scaleSharesToNet(900, [
+      { name: "Ada", share: 600 },
+      { name: "Bo", share: 400 },
+    ])).toEqual({
+      shares: [
+        { name: "Ada", share: 540 },
+        { name: "Bo", share: 360 },
+      ],
+      remainder: 0,
+    });
+  });
+
+  it("leaves leftover whole silver as remainder", () => {
+    expect(scaleSharesToNet(901, [
+      { name: "Ada", share: 600 },
+      { name: "Bo", share: 400 },
+    ])).toEqual({
+      shares: [
+        { name: "Ada", share: 540 },
+        { name: "Bo", share: 360 },
+      ],
+      remainder: 1,
+    });
   });
 });
 

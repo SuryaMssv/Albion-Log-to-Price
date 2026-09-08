@@ -1,4 +1,9 @@
-import { buildParticipantShares, computeSplit } from "./calculator";
+import {
+  buildParticipantShares,
+  combineParticipantShares,
+  computeSplit,
+  scaleSharesToNet,
+} from "./calculator";
 import type { CalculationResult, LootRunResult, ParticipantShare } from "./types";
 
 export interface DeductionsInput {
@@ -102,12 +107,18 @@ export function computeManualSplit(input: ManualSplitInput): ManualSplit {
   };
 }
 
-export function recomputeRun(run: LootRunResult, deductions: DeductionsInput): LootRunResult {
-  const breakdown = computeNet(run.totalValue, deductions);
-  const { share, remainder } = computeSplit(breakdown.netValue, run.participants);
+/** Split this run's gross among its names. Session fees stay off the run. */
+export function splitRunGross(run: LootRunResult): LootRunResult {
+  const { share, remainder } = computeSplit(run.totalValue, run.participants);
   return {
     ...run,
-    ...breakdown,
+    netValue: run.totalValue,
+    repairCost: 0,
+    sellerFee: 0,
+    guildFee: 0,
+    marketSetupFee: 0,
+    marketTaxFee: 0,
+    marketFee: 0,
     share,
     remainder,
     participantShares: buildParticipantShares(
@@ -123,30 +134,25 @@ export function rollupRuns(
   runs: LootRunResult[],
   deductions: DeductionsInput,
 ): CalculationResult {
-  const primary = runs[0];
+  const grossRuns = runs.map(splitRunGross);
+  const sessionGross = grossRuns.reduce((sum, run) => sum + run.totalValue, 0);
+  const breakdown = computeNet(sessionGross, deductions);
+  const claims = combineParticipantShares(grossRuns);
+  const { shares, remainder } = scaleSharesToNet(breakdown.netValue, claims);
+  const even =
+    shares.length > 0 && shares.every((participant) => participant.share === shares[0].share);
   return {
     ...base,
-    totalValue: runs.reduce((sum, run) => sum + run.totalValue, 0),
-    netValue: runs.reduce((sum, run) => sum + run.netValue, 0),
-    repairCost: deductions.repairCost,
-    sellerTaxPercent: deductions.sellerTaxPercent,
-    guildTaxPercent: deductions.guildTaxPercent,
-    premium: deductions.premium,
-    marketSetupPercent: primary?.marketSetupPercent ?? 2.5,
-    marketTaxPercent: primary?.marketTaxPercent ?? 4,
-    sellerFee: runs.reduce((sum, run) => sum + run.sellerFee, 0),
-    guildFee: runs.reduce((sum, run) => sum + run.guildFee, 0),
-    marketSetupFee: runs.reduce((sum, run) => sum + run.marketSetupFee, 0),
-    marketTaxFee: runs.reduce((sum, run) => sum + run.marketTaxFee, 0),
-    marketFee: runs.reduce((sum, run) => sum + run.marketFee, 0),
-    participants: runs.length === 1 ? (primary?.participants ?? 1) : runs.reduce((sum, run) => sum + run.participants, 0),
-    share: runs.length === 1 ? (primary?.share ?? 0) : 0,
-    remainder: runs.length === 1 ? (primary?.remainder ?? 0) : 0,
-    participantShares: runs.length === 1 ? (primary?.participantShares ?? []) : [],
-    items: runs.flatMap((run) => run.items),
-    unresolvedItems: runs.flatMap((run) => run.unresolvedItems),
-    missingPrices: runs.flatMap((run) => run.missingPrices),
-    runs,
+    totalValue: sessionGross,
+    ...breakdown,
+    participants: shares.length > 0 ? shares.length : 1,
+    share: even ? (shares[0]?.share ?? 0) : 0,
+    remainder,
+    participantShares: shares,
+    items: grossRuns.flatMap((run) => run.items),
+    unresolvedItems: grossRuns.flatMap((run) => run.unresolvedItems),
+    missingPrices: grossRuns.flatMap((run) => run.missingPrices),
+    runs: grossRuns,
   };
 }
 
@@ -155,6 +161,15 @@ export function hasDeductions(result: Pick<DeductionBreakdown, "repairCost" | "s
   return result.repairCost > 0 || result.sellerFee > 0 || result.guildFee > 0 || result.marketFee > 0;
 }
 
+function sharesMatch(left: ParticipantShare[], right: ParticipantShare[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((participant, index) => {
+      const other = right[index];
+      return other !== undefined && other.name === participant.name && other.share === participant.share;
+    })
+  );
+}
 function alreadyApplied(result: CalculationResult, breakdown: DeductionBreakdown): boolean {
   return (
     result.repairCost === breakdown.repairCost &&
@@ -179,7 +194,6 @@ export function applyDeductions(
   deductions: DeductionsInput = ZERO_DEDUCTIONS,
 ): CalculationResult {
   if (result.runs && result.runs.length > 0) {
-    const runs = result.runs.map((run) => recomputeRun(run, deductions));
     const next = rollupRuns(
       {
         parseErrors: result.parseErrors,
@@ -189,7 +203,7 @@ export function applyDeductions(
         stats: result.stats,
         warnings: result.warnings,
       },
-      runs,
+      result.runs,
       deductions,
     );
     if (
@@ -197,7 +211,8 @@ export function applyDeductions(
       next.repairCost === result.repairCost &&
       next.sellerTaxPercent === result.sellerTaxPercent &&
       next.guildTaxPercent === result.guildTaxPercent &&
-      next.premium === result.premium
+      next.premium === result.premium &&
+      sharesMatch(next.participantShares, result.participantShares)
     ) {
       return result;
     }

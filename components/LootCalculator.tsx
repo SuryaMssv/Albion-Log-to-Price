@@ -11,6 +11,7 @@ import {
   isParticipantDraft,
   isPercentDraft,
   isSilverDraft,
+  MAX_PARTICIPANTS,
   MAX_REPAIR_COST,
   parseParticipantsField,
   parsePercentField,
@@ -50,7 +51,17 @@ const emptyRunDraft = (): ChestLogRunInputs => ({
 });
 
 const nameFieldClass =
-  "h-6 w-full max-w-44 rounded-sm border border-border-soft bg-surface-raised px-1.5 text-xs leading-none text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40";
+  "h-6 w-28 shrink-0 rounded-sm border border-border-soft bg-surface-raised px-1.5 text-xs leading-none text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40";
+
+const rosterBtnClass =
+  "h-6 shrink-0 rounded-sm border border-border-soft bg-surface-raised px-2 text-[11px] font-medium text-foreground transition-colors hover:border-gold-dim disabled:cursor-not-allowed disabled:opacity-40";
+
+type RosterClipboard = { participants: string; names: string[] };
+
+function rosterFromDraft(draft: ChestLogRunInputs): RosterClipboard {
+  const count = parseParticipantsField(draft.participants);
+  return { participants: draft.participants, names: draft.names.slice(0, count) };
+}
 
 const fieldClass =
   "min-h-8 rounded-md border border-border-soft bg-surface-raised px-2.5 text-sm tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40";
@@ -74,6 +85,10 @@ export default function LootCalculator() {
   const [layoutOverride, setLayoutOverride] = useState<RunLayout | null>(null);
   const [layoutLog, setLayoutLog] = useState<string | null>(null);
   const [layoutGap, setLayoutGap] = useState<RunGapMinutes | null>(null);
+  const [rosterClipboard, setRosterClipboard] = useState<RosterClipboard | null>(null);
+  const [rosterFlash, setRosterFlash] = useState<{ index: number; kind: "copied" | "pasted" } | null>(
+    null,
+  );
   const resultsRef = useRef<HTMLDivElement>(null);
   const entryIdRef = useRef<string | null>(null);
   const lastLogRef = useRef("");
@@ -147,6 +162,38 @@ export default function LootCalculator() {
       next[index] = { ...next[index], ...patch };
       return next;
     });
+  }
+
+  function flashRoster(index: number, kind: "copied" | "pasted") {
+    setRosterFlash({ index, kind });
+    window.setTimeout(() => {
+      setRosterFlash((current) =>
+        current?.index === index && current.kind === kind ? null : current,
+      );
+    }, 1500);
+  }
+
+  function copyRoster(index: number) {
+    const draft = draftAt(index);
+    if (parseParticipantsField(draft.participants) < 1) return;
+    setRosterClipboard(rosterFromDraft(draft));
+    flashRoster(index, "copied");
+  }
+
+  function pasteRoster(index: number) {
+    if (!rosterClipboard) return;
+    patchRun(index, {
+      participants: rosterClipboard.participants,
+      names: [...rosterClipboard.names],
+    });
+    flashRoster(index, "pasted");
+  }
+
+  function addParticipant(index: number) {
+    const draft = draftAt(index);
+    const count = parseParticipantsField(draft.participants);
+    if (count >= MAX_PARTICIPANTS) return;
+    patchRun(index, { participants: String(count + 1) });
   }
 
   const persist = useCallback(
@@ -265,7 +312,15 @@ export default function LootCalculator() {
       setResult(next);
       persist(next, overrides, !entryIdRef.current || lastLogRef.current !== log);
       requestAnimationFrame(() => {
-        resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        const target = resultsRef.current;
+        if (!target) return;
+        // scrollIntoView also shifts html/body, which clips the header and lifts the footer.
+        window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+        const scroller = target.closest("main");
+        if (!(scroller instanceof HTMLElement)) return;
+        const nextTop =
+          scroller.scrollTop + target.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+        scroller.scrollTo({ top: Math.max(0, nextTop), behavior: "smooth" });
       });
     } catch {
       setError("Could not reach the calculator. Check your connection and retry.");
@@ -511,8 +566,9 @@ export default function LootCalculator() {
 
         <p className="mt-1.5 text-[11px] leading-snug text-muted">
           Repair is silver. Seller buffer and guild tax are optional percents of gross.{" "}
-          {PRICE_BASES[priceBasis].hint} Buy orders are never used. Repair is deducted in full from every
-          run. Loot more than the group window apart starts a new run.
+          {PRICE_BASES[priceBasis].hint} Buy orders are never used. Repair and selling fees apply once to
+          the session. Same names across runs add up. Loot more than the group window apart starts a new
+          run.
         </p>
 
         <div className="mt-3 flex flex-wrap gap-1.5">
@@ -613,8 +669,8 @@ export default function LootCalculator() {
                   }}
                 >
                   <p className="text-xs font-medium text-foreground">{heading}</p>
-                  <div className="mt-1.5 flex flex-col gap-1">
-                    <label className="flex max-w-40 flex-col gap-0.5 text-[11px]">
+                  <div className="mt-1.5 flex flex-wrap items-end gap-1.5">
+                    <label className="flex flex-col gap-0.5 text-[11px]">
                       <span className="text-muted">Participants</span>
                       <input
                         type="text"
@@ -624,28 +680,57 @@ export default function LootCalculator() {
                           const raw = event.target.value.replace(/^0+(?=\d)/, "");
                           if (isParticipantDraft(raw)) patchRun(index, { participants: raw });
                         }}
-                        className={nameFieldClass}
+                        className={`${nameFieldClass} w-14`}
                       />
                     </label>
-                    {count >= 1 && (
-                      <div className="flex max-w-44 flex-col gap-1">
-                        {Array.from({ length: count }, (_, nameIndex) => (
-                          <input
-                            key={nameIndex}
-                            type="text"
-                            maxLength={40}
-                            value={draft.names[nameIndex] ?? ""}
-                            onChange={(event) => {
-                              const names = [...draft.names];
-                              names[nameIndex] = event.target.value;
-                              patchRun(index, { names });
-                            }}
-                            placeholder={`Player ${nameIndex + 1}`}
-                            className={nameFieldClass}
-                          />
-                        ))}
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      className={rosterBtnClass}
+                      disabled={count < 1}
+                      onClick={() => copyRoster(index)}
+                      aria-label="Copy participants"
+                    >
+                      {rosterFlash?.index === index && rosterFlash.kind === "copied"
+                        ? "Copied"
+                        : "Copy"}
+                    </button>
+                    <button
+                      type="button"
+                      className={rosterBtnClass}
+                      disabled={!rosterClipboard}
+                      onClick={() => pasteRoster(index)}
+                      aria-label="Paste participants"
+                    >
+                      {rosterFlash?.index === index && rosterFlash.kind === "pasted"
+                        ? "Pasted"
+                        : "Paste"}
+                    </button>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                    {count >= 1 &&
+                      Array.from({ length: count }, (_, nameIndex) => (
+                        <input
+                          key={nameIndex}
+                          type="text"
+                          maxLength={40}
+                          value={draft.names[nameIndex] ?? ""}
+                          onChange={(event) => {
+                            const names = [...draft.names];
+                            names[nameIndex] = event.target.value;
+                            patchRun(index, { names });
+                          }}
+                          placeholder={`Player ${nameIndex + 1}`}
+                          className={nameFieldClass}
+                        />
+                      ))}
+                    <button
+                      type="button"
+                      className={rosterBtnClass}
+                      disabled={count >= MAX_PARTICIPANTS}
+                      onClick={() => addParticipant(index)}
+                    >
+                      + add participant
+                    </button>
                   </div>
                   <div className="mt-2">
                     <ItemTable
