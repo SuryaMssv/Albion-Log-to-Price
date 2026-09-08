@@ -6,7 +6,7 @@ import {
   upsertEntry,
   type HistoryEntry,
 } from "@/lib/history";
-import { buildExportJson } from "@/lib/export";
+import { buildExportJson, parseExportJson } from "@/lib/export";
 import type { CalculationResult } from "@/lib/types";
 
 function snapshot() {
@@ -74,6 +74,13 @@ describe("parseHistory", () => {
     expect(parseHistory(JSON.stringify(entries))).toEqual(entries);
   });
 
+  it("keeps the run grouping window on a chest-log entry", () => {
+    const entry = chestLogEntry("gap");
+    if (entry.source !== "chest-log") throw new Error("expected chest-log");
+    entry.inputs.runGapMinutes = 30;
+    expect(parseHistory(JSON.stringify([entry]))).toEqual([entry]);
+  });
+
   it("drops entries missing an id or source", () => {
     const raw = JSON.stringify([
       calculatorEntry("ok", "2026-08-28T01:00:00.000Z"),
@@ -115,6 +122,25 @@ describe("removeEntry", () => {
   it("removes by id", () => {
     const entries = [calculatorEntry("a", "1"), calculatorEntry("b", "2")];
     expect(removeEntry(entries, "a").map((entry) => entry.id)).toEqual(["b"]);
+  });
+});
+
+describe("parseExportJson", () => {
+  it("round-trips a chest-log export", () => {
+    const entry = chestLogEntry("split-1", { "T4_BAG@1|4": 12_000 });
+    expect(parseExportJson(buildExportJson(entry))).toEqual(entry);
+  });
+
+  it("round-trips a calculator export", () => {
+    const entry = calculatorEntry("calc-1", "2026-08-28T01:00:00.000Z", "9420000");
+    expect(parseExportJson(buildExportJson(entry))).toEqual(entry);
+  });
+
+  it("rejects invalid or empty payloads", () => {
+    expect(parseExportJson("")).toBeNull();
+    expect(parseExportJson("not json")).toBeNull();
+    expect(parseExportJson("{}")).toBeNull();
+    expect(parseExportJson(JSON.stringify([calculatorEntry("a", "1")]))).toBeNull();
   });
 });
 

@@ -1,7 +1,16 @@
-import type { HistoryEntry } from "./history";
+import { isHistoryEntry, type HistoryEntry } from "./history";
 
 export function buildExportJson(entry: HistoryEntry): string {
   return JSON.stringify(entry, null, 2);
+}
+
+export function parseExportJson(raw: string): HistoryEntry | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isHistoryEntry(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export function downloadJson(filename: string, json: string): void {

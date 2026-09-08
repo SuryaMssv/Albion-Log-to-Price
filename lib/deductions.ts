@@ -1,5 +1,5 @@
 import { buildParticipantShares, computeSplit } from "./calculator";
-import type { CalculationResult, ParticipantShare } from "./types";
+import type { CalculationResult, LootRunResult, ParticipantShare } from "./types";
 
 export interface DeductionsInput {
   repairCost: number;
@@ -102,6 +102,54 @@ export function computeManualSplit(input: ManualSplitInput): ManualSplit {
   };
 }
 
+export function recomputeRun(run: LootRunResult, deductions: DeductionsInput): LootRunResult {
+  const breakdown = computeNet(run.totalValue, deductions);
+  const { share, remainder } = computeSplit(breakdown.netValue, run.participants);
+  return {
+    ...run,
+    ...breakdown,
+    share,
+    remainder,
+    participantShares: buildParticipantShares(
+      run.participants,
+      share,
+      run.participantShares.map((participant) => participant.name),
+    ),
+  };
+}
+
+export function rollupRuns(
+  base: Pick<CalculationResult, "parseErrors" | "priceBasis" | "server" | "city" | "stats" | "warnings">,
+  runs: LootRunResult[],
+  deductions: DeductionsInput,
+): CalculationResult {
+  const primary = runs[0];
+  return {
+    ...base,
+    totalValue: runs.reduce((sum, run) => sum + run.totalValue, 0),
+    netValue: runs.reduce((sum, run) => sum + run.netValue, 0),
+    repairCost: deductions.repairCost,
+    sellerTaxPercent: deductions.sellerTaxPercent,
+    guildTaxPercent: deductions.guildTaxPercent,
+    premium: deductions.premium,
+    marketSetupPercent: primary?.marketSetupPercent ?? 2.5,
+    marketTaxPercent: primary?.marketTaxPercent ?? 4,
+    sellerFee: runs.reduce((sum, run) => sum + run.sellerFee, 0),
+    guildFee: runs.reduce((sum, run) => sum + run.guildFee, 0),
+    marketSetupFee: runs.reduce((sum, run) => sum + run.marketSetupFee, 0),
+    marketTaxFee: runs.reduce((sum, run) => sum + run.marketTaxFee, 0),
+    marketFee: runs.reduce((sum, run) => sum + run.marketFee, 0),
+    participants: runs.length === 1 ? (primary?.participants ?? 1) : runs.reduce((sum, run) => sum + run.participants, 0),
+    share: runs.length === 1 ? (primary?.share ?? 0) : 0,
+    remainder: runs.length === 1 ? (primary?.remainder ?? 0) : 0,
+    participantShares: runs.length === 1 ? (primary?.participantShares ?? []) : [],
+    items: runs.flatMap((run) => run.items),
+    unresolvedItems: runs.flatMap((run) => run.unresolvedItems),
+    missingPrices: runs.flatMap((run) => run.missingPrices),
+    runs,
+  };
+}
+
 /** True when selling fees or repair actually change the split. */
 export function hasDeductions(result: Pick<DeductionBreakdown, "repairCost" | "sellerFee" | "guildFee" | "marketFee">): boolean {
   return result.repairCost > 0 || result.sellerFee > 0 || result.guildFee > 0 || result.marketFee > 0;
@@ -130,6 +178,32 @@ export function applyDeductions(
   result: CalculationResult,
   deductions: DeductionsInput = ZERO_DEDUCTIONS,
 ): CalculationResult {
+  if (result.runs && result.runs.length > 0) {
+    const runs = result.runs.map((run) => recomputeRun(run, deductions));
+    const next = rollupRuns(
+      {
+        parseErrors: result.parseErrors,
+        priceBasis: result.priceBasis,
+        server: result.server,
+        city: result.city,
+        stats: result.stats,
+        warnings: result.warnings,
+      },
+      runs,
+      deductions,
+    );
+    if (
+      next.netValue === result.netValue &&
+      next.repairCost === result.repairCost &&
+      next.sellerTaxPercent === result.sellerTaxPercent &&
+      next.guildTaxPercent === result.guildTaxPercent &&
+      next.premium === result.premium
+    ) {
+      return result;
+    }
+    return next;
+  }
+
   const breakdown = computeNet(result.totalValue, deductions);
   if (alreadyApplied(result, breakdown)) return result;
 

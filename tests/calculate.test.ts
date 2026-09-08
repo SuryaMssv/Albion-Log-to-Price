@@ -298,6 +298,42 @@ describe("calculateLootSplit", () => {
     expect(result.missingPrices[0].reason).toMatch(/Market data was unavailable/);
     expect(result.warnings.length).toBeGreaterThan(0);
   });
+
+  it("splits distant timestamps into runs and deducts full repair on each", async () => {
+    const log = [
+      `"Date" "Player" "Item" "Enchantment" "Quality" "Amount"`,
+      `"08/18/2026 11:49:51" "A" "Adept's Fiend Cowl" "2" "4" "1"`,
+      `"08/18/2026 14:00:00" "B" "Adept's Bag" "1" "4" "1"`,
+    ].join("\n");
+    const result = await calculateLootSplit(
+      {
+        log,
+        server: "east",
+        city: "Caerleon",
+        priceBasis: "sell_min",
+        participants: 5,
+        repairCost: 1_000,
+        runs: [
+          { participants: 2, participantNames: ["Ada"] },
+          { participants: 3, participantNames: [] },
+        ],
+      },
+      fakeMarket,
+    );
+
+    expect(result.runs).toHaveLength(2);
+    const [firstRun, secondRun] = result.runs ?? [];
+    expect(firstRun?.totalValue).toBe(900_000);
+    expect(firstRun?.repairCost).toBe(1_000);
+    expect(firstRun?.participants).toBe(2);
+    expect(firstRun?.participantShares[0].name).toBe("Ada");
+    expect(secondRun?.totalValue).toBe(100_000);
+    expect(secondRun?.repairCost).toBe(1_000);
+    expect(secondRun?.participants).toBe(3);
+    expect(result.totalValue).toBe(1_000_000);
+    expect(result.netValue).toBe((firstRun?.netValue ?? 0) + (secondRun?.netValue ?? 0));
+    expect(result.netValue).toBeLessThan(result.totalValue - 1_000);
+  });
 });
 
 describe("output formats", () => {
@@ -325,6 +361,34 @@ describe("output formats", () => {
     expect(message).toContain("• Ari — 319,146");
     expect(message).toContain("• Player 3 — 319,146");
     expect(message).toContain("⚠️ 2 item stack(s) excluded");
+    expect(message).toContain("📊 Price: East — Caerleon lowest sell order");
+  });
+
+  it("lists every run in one Discord message", async () => {
+    const log = [
+      `"Date" "Player" "Item" "Enchantment" "Quality" "Amount"`,
+      `"08/18/2026 11:49:51" "A" "Adept's Fiend Cowl" "2" "4" "1"`,
+      `"08/18/2026 14:00:00" "B" "Adept's Bag" "1" "4" "1"`,
+    ].join("\n");
+    const result = await calculateLootSplit(
+      {
+        log,
+        server: "east",
+        city: "Caerleon",
+        priceBasis: "sell_min",
+        participants: 5,
+        runs: [
+          { participants: 2, participantNames: ["Ada"] },
+          { participants: 3, participantNames: [] },
+        ],
+      },
+      fakeMarket,
+    );
+    const message = buildDiscordMessage(result);
+    expect(message).toContain("💰 Session Gross:");
+    expect(message).toContain("**Run 1 · 18/Aug/26 11:49 am [5:19 pm]**");
+    expect(message).toContain("**Run 2 · 18/Aug/26 2:00 pm [7:30 pm]**");
+    expect(message).toContain("• Ada —");
     expect(message).toContain("📊 Price: East — Caerleon lowest sell order");
   });
 
@@ -392,8 +456,17 @@ describe("discord source notes", () => {
       { log: SAMPLE, server: "east", city: "Caerleon", priceBasis: "sell_min", participants: 5 },
       fakeMarket,
     );
+    const priced = { ...result.items[0], source: "recent_sale" as const, saleCount: 12 };
     const withManual = applyManualPrices(
-      { ...result, items: [{ ...result.items[0], source: "recent_sale", saleCount: 12 }] },
+      {
+        ...result,
+        items: [priced, ...result.items.slice(1)],
+        runs: result.runs?.map((run, index) =>
+          index === 0
+            ? { ...run, items: [{ ...run.items[0], source: "recent_sale" as const, saleCount: 12 }, ...run.items.slice(1)] }
+            : run,
+        ),
+      },
       { [overrideKey(result.missingPrices[0])]: 5_000 },
       "2026-08-18T12:30:00.000Z",
     );

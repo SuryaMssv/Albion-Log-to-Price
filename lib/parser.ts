@@ -216,7 +216,7 @@ export function parseChestLog(text: string): ParseResult {
  * Albion chest copies use `MM/DD/YYYY HH:MM:SS`. Returns UTC ms, or null if the
  * cell is not a date — aggregation then falls back to line order.
  */
-function parseChestDate(raw: string): number | null {
+export function parseChestDate(raw: string): number | null {
   const match = raw
     .trim()
     .match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
@@ -229,11 +229,62 @@ function parseChestDate(raw: string): number | null {
 }
 
 /** Oldest event first. Equal timestamps keep file order. */
-function compareChestRows(a: ParsedRow, b: ParsedRow): number {
+export function compareChestRows(a: ParsedRow, b: ParsedRow): number {
   const timeA = parseChestDate(a.date);
   const timeB = parseChestDate(b.date);
   if (timeA !== null && timeB !== null && timeA !== timeB) return timeA - timeB;
   return a.line - b.line;
+}
+
+/** Two deposits this far apart (strictly more than the selected gap) start a new run. */
+export const RUN_GAP_OPTIONS = [
+  { minutes: 10, label: "10 min" },
+  { minutes: 30, label: "30 min" },
+  { minutes: 60, label: "1 hr" },
+] as const;
+
+export type RunGapMinutes = (typeof RUN_GAP_OPTIONS)[number]["minutes"];
+
+export const RUN_GAP_MS = 10 * 60 * 1000;
+
+export function isRunGapMinutes(value: unknown): value is RunGapMinutes {
+  return value === 10 || value === 30 || value === 60;
+}
+
+export function runGapMs(minutes: RunGapMinutes): number {
+  return minutes * 60 * 1000;
+}
+
+export interface LootRun {
+  index: number;
+  startedAt: string;
+  endedAt: string;
+  rows: ParsedRow[];
+}
+
+/** Group chest rows into fights. A gap greater than the selected window starts a new run. */
+export function clusterRowsIntoRuns(rows: ParsedRow[], gapMs: number = RUN_GAP_MS): LootRun[] {
+  if (rows.length === 0) return [];
+  const sorted = [...rows].sort(compareChestRows);
+  const groups: ParsedRow[][] = [[sorted[0]]];
+  let previousTime = parseChestDate(sorted[0].date);
+
+  for (const row of sorted.slice(1)) {
+    const time = parseChestDate(row.date);
+    if (time !== null && previousTime !== null && time - previousTime > gapMs) {
+      groups.push([row]);
+    } else {
+      groups[groups.length - 1].push(row);
+    }
+    if (time !== null) previousTime = time;
+  }
+
+  return groups.map((group, index) => ({
+    index: index + 1,
+    startedAt: group[0].date,
+    endedAt: group[group.length - 1].date,
+    rows: group,
+  }));
 }
 
 function stackKey(row: ParsedRow): string {
@@ -274,9 +325,10 @@ export function aggregateRows(rows: ParsedRow[]): AggregatedEntry[] {
     }
     if (amount <= 0) continue;
 
-    const first = group[0];
+    const ordered = [...group].sort(compareChestRows);
+    const first = ordered[0];
     const players: string[] = [];
-    for (const row of group) {
+    for (const row of ordered) {
       if (row.player && !players.includes(row.player)) players.push(row.player);
     }
     stacks.push({
@@ -285,7 +337,8 @@ export function aggregateRows(rows: ParsedRow[]): AggregatedEntry[] {
       quality: first.quality,
       amount,
       players,
-      lines: group.map((row) => row.line),
+      lines: ordered.map((row) => row.line),
+      lootDate: first.date,
     });
   }
 

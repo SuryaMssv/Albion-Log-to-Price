@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import LogInput from "./LogInput";
 import ResultsPanel from "./ResultsPanel";
+import JsonUploadButton from "./JsonUploadButton";
 import { useHistory } from "./HistoryContext";
 import { applyDeductions } from "@/lib/deductions";
 import { buildExportJson, downloadJson } from "@/lib/export";
@@ -15,8 +16,21 @@ import {
   parsePercentField,
   parseSilverField,
 } from "@/lib/fields";
-import { newHistoryId, snapshotFromResult } from "@/lib/history";
+import { newHistoryId, runDraftsFromInputs, snapshotFromResult, type ChestLogRunInputs, type HistoryEntry } from "@/lib/history";
+import { compareChestRows, clusterRowsIntoRuns, isRunGapMinutes, parseChestLog, RUN_GAP_OPTIONS, runGapMs, type RunGapMinutes } from "@/lib/parser";
+import { runHeading } from "@/lib/discord";
 import { applyManualPrices } from "@/lib/overrides";
+import {
+  layoutFromRuns,
+  lineGroupsForCalculate,
+  moveStack,
+  reorderStack,
+  runCount,
+  tableItemsForRun,
+  toggleStackExcluded,
+  type RunLayout,
+} from "@/lib/runs";
+import ItemTable from "./ItemTable";
 import {
   CITIES,
   PRICE_BASES,
@@ -29,23 +43,37 @@ import {
 
 const SAVE_DEBOUNCE_MS = 500;
 
+const emptyRunDraft = (): ChestLogRunInputs => ({
+  participants: "",
+  useNames: true,
+  names: [],
+});
+
+const nameFieldClass =
+  "h-6 w-full max-w-44 rounded-sm border border-border-soft bg-surface-raised px-1.5 text-xs leading-none text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40";
+
+const fieldClass =
+  "min-h-8 rounded-md border border-border-soft bg-surface-raised px-2.5 text-sm tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40";
+
 export default function LootCalculator() {
-  const { upsert, registerRestore } = useHistory();
+  const { upsert, registerRestore, open } = useHistory();
   const [log, setLog] = useState("");
   const [server, setServer] = useState<ServerId>("east");
   const [city, setCity] = useState<City | "">("");
   const [priceBasis, setPriceBasis] = useState<PriceBasis>("sell_mid");
-  const [participants, setParticipants] = useState("5");
+  const [runGapMinutes, setRunGapMinutes] = useState<RunGapMinutes>(10);
+  const [runDrafts, setRunDrafts] = useState<ChestLogRunInputs[]>([]);
   const [repairCost, setRepairCost] = useState("");
   const [sellerTax, setSellerTax] = useState("");
   const [guildTax, setGuildTax] = useState("");
   const [premium, setPremium] = useState(true);
-  const [useNames, setUseNames] = useState(false);
-  const [names, setNames] = useState<string[]>([]);
   const [result, setResult] = useState<CalculationResult | null>(null);
   const [overrides, setOverrides] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [layoutOverride, setLayoutOverride] = useState<RunLayout | null>(null);
+  const [layoutLog, setLayoutLog] = useState<string | null>(null);
+  const [layoutGap, setLayoutGap] = useState<RunGapMinutes | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const entryIdRef = useRef<string | null>(null);
   const lastLogRef = useRef("");
@@ -59,16 +87,18 @@ export default function LootCalculator() {
       setServer(entry.inputs.server);
       setCity(entry.inputs.city);
       setPriceBasis(entry.inputs.priceBasis);
-      setParticipants(entry.inputs.participants);
+      setRunGapMinutes(isRunGapMinutes(entry.inputs.runGapMinutes) ? entry.inputs.runGapMinutes : 10);
+      setRunDrafts(runDraftsFromInputs(entry.inputs));
       setRepairCost(entry.inputs.repairCost);
       setSellerTax(entry.inputs.sellerTax);
       setGuildTax(entry.inputs.guildTax);
       setPremium(entry.inputs.premium);
-      setUseNames(entry.inputs.useNames);
-      setNames(entry.inputs.names);
       setResult(entry.result);
       setOverrides(entry.overrides);
       setError(null);
+      setLayoutOverride(null);
+      setLayoutLog(null);
+      setLayoutGap(null);
       entryIdRef.current = entry.id;
       lastLogRef.current = entry.inputs.log;
     });
@@ -83,7 +113,41 @@ export default function LootCalculator() {
     }),
     [repairCost, sellerTax, guildTax, premium],
   );
-  const participantCount = parseParticipantsField(participants);
+  const parsedRows = useMemo(() => parseChestLog(log).rows, [log]);
+  const clustered = useMemo(
+    () => clusterRowsIntoRuns(parsedRows, runGapMs(runGapMinutes)),
+    [parsedRows, runGapMinutes],
+  );
+  const defaultLayout = useMemo(() => layoutFromRuns(clustered), [clustered]);
+  const layout =
+    layoutLog === log && layoutGap === runGapMinutes && layoutOverride ? layoutOverride : defaultLayout;
+
+  function setLayout(next: RunLayout | ((previous: RunLayout) => RunLayout)) {
+    setLayoutLog(log);
+    setLayoutGap(runGapMinutes);
+    setLayoutOverride((previous) => {
+      const current =
+        layoutLog === log && layoutGap === runGapMinutes && previous ? previous : defaultLayout;
+      return typeof next === "function" ? next(current) : next;
+    });
+  }
+
+  function draftAt(index: number): ChestLogRunInputs {
+    return runDrafts[index] ?? emptyRunDraft();
+  }
+
+  function alignedDrafts(): ChestLogRunInputs[] {
+    return clustered.map((_, index) => draftAt(index));
+  }
+
+  function patchRun(index: number, patch: Partial<ChestLogRunInputs>) {
+    setRunDrafts((previous) => {
+      const count = Math.max(clustered.length, index + 1, previous.length);
+      const next = Array.from({ length: count }, (_, i) => previous[i] ?? emptyRunDraft());
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
+  }
 
   const persist = useCallback(
     (payload: CalculationResult, currentOverrides: Record<string, number>, asNew: boolean) => {
@@ -91,6 +155,8 @@ export default function LootCalculator() {
       if (asNew || !entryIdRef.current) entryIdRef.current = newHistoryId();
       lastLogRef.current = log;
       const displayed = applyDeductions(applyManualPrices(payload, currentOverrides), deductions);
+      const drafts = alignedDrafts();
+      const first = drafts[0] ?? emptyRunDraft();
       upsert({
         id: entryIdRef.current,
         savedAt: new Date().toISOString(),
@@ -100,9 +166,11 @@ export default function LootCalculator() {
           server,
           city,
           priceBasis,
-          participants,
-          useNames,
-          names,
+          runGapMinutes,
+          participants: first.participants,
+          useNames: first.useNames,
+          names: first.names,
+          runs: drafts,
           repairCost,
           sellerTax,
           guildTax,
@@ -118,15 +186,15 @@ export default function LootCalculator() {
       deductions,
       guildTax,
       log,
-      names,
-      participants,
+      clustered,
+      runDrafts,
       premium,
       priceBasis,
+      runGapMinutes,
       repairCost,
       sellerTax,
       server,
       upsert,
-      useNames,
     ],
   );
 
@@ -149,8 +217,16 @@ export default function LootCalculator() {
       setError("Select the city to price the loot against.");
       return;
     }
-    if (participantCount < 1) {
-      setError("Enter how many participants split the loot.");
+    if (clustered.length === 0) {
+      setError("Could not find any loot rows in that log.");
+      return;
+    }
+    const drafts = Array.from({ length: Math.max(runCount(layout), clustered.length) }, (_, index) =>
+      draftAt(index),
+    );
+    const invalid = drafts.findIndex((draft) => parseParticipantsField(draft.participants) < 1);
+    if (invalid !== -1) {
+      setError(`Enter how many participants split run ${invalid + 1}.`);
       return;
     }
     setBusy(true);
@@ -164,12 +240,19 @@ export default function LootCalculator() {
           server,
           city,
           price_basis: priceBasis,
-          participants: participantCount,
+          participants: parseParticipantsField(drafts[0]?.participants ?? ""),
           repair_cost: deductions.repairCost,
           seller_tax: deductions.sellerTaxPercent,
           guild_tax: deductions.guildTaxPercent,
           premium: deductions.premium,
-          participant_names: useNames ? names.slice(0, participantCount) : [],
+          run_lines: lineGroupsForCalculate(parsedRows, layout),
+          runs: drafts.map((draft) => {
+            const count = parseParticipantsField(draft.participants);
+            return {
+              participants: count,
+              participant_names: draft.names.slice(0, count),
+            };
+          }),
         }),
       });
       const payload = await response.json();
@@ -190,28 +273,24 @@ export default function LootCalculator() {
     } finally {
       setBusy(false);
     }
-  }, [log, server, city, priceBasis, participantCount, deductions, useNames, names, persist, overrides]);
+  }, [log, server, city, priceBasis, clustered, runDrafts, deductions, persist, overrides, parsedRows, layout]);
 
   function clearAll() {
     setLog("");
     setResult(null);
     setError(null);
-    setNames([]);
     setRepairCost("");
     setSellerTax("");
     setGuildTax("");
     setPremium(true);
     setOverrides({});
+    setRunDrafts([]);
+    setLayoutOverride(null);
+    setLayoutLog(null);
+    setLayoutGap(null);
+    setRunGapMinutes(10);
     entryIdRef.current = null;
     lastLogRef.current = "";
-  }
-
-  function updateName(index: number, value: string) {
-    setNames((previous) => {
-      const next = [...previous];
-      next[index] = value;
-      return next;
-    });
   }
 
   function updateOverride(key: string, value: number | null) {
@@ -223,10 +302,18 @@ export default function LootCalculator() {
     });
   }
 
+  function importJson(entry: HistoryEntry) {
+    setError(null);
+    upsert(entry);
+    open(entry);
+  }
+
   function exportJson() {
     if (!result || city === "") return;
     persist(result, overrides, false);
     const displayed = applyDeductions(applyManualPrices(result, overrides), deductions);
+    const drafts = alignedDrafts();
+    const first = drafts[0] ?? emptyRunDraft();
     downloadJson(
       `albion-loot-${displayed.stats.calculatedAt.slice(0, 10)}.json`,
       buildExportJson({
@@ -238,9 +325,11 @@ export default function LootCalculator() {
           server,
           city,
           priceBasis,
-          participants,
-          useNames,
-          names,
+          runGapMinutes,
+          participants: first.participants,
+          useNames: first.useNames,
+          names: first.names,
+          runs: drafts,
           repairCost,
           sellerTax,
           guildTax,
@@ -254,17 +343,22 @@ export default function LootCalculator() {
   }
 
   return (
-    <div className="flex flex-col gap-8">
-      <section className="rounded-2xl border border-border-soft bg-surface/60 p-4 sm:p-6">
-        <LogInput value={log} onChange={setLog} disabled={busy} />
+    <div className="flex flex-col gap-4">
+      <section className="rounded-xl border border-border-soft bg-surface/60 p-3">
+        <LogInput
+          value={log}
+          onChange={setLog}
+          disabled={busy}
+          extraActions={<JsonUploadButton onLoaded={importJson} onError={setError} disabled={busy} />}
+        />
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <label className="flex flex-col gap-1.5 text-sm">
+        <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted">Server</span>
             <select
               value={server}
               onChange={(event) => setServer(event.target.value as ServerId)}
-              className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-3 text-foreground outline-none focus:ring-2 focus:ring-gold/40"
+              className={fieldClass}
             >
               {Object.entries(SERVERS).map(([id, meta]) => (
                 <option key={id} value={id}>
@@ -274,7 +368,7 @@ export default function LootCalculator() {
             </select>
           </label>
 
-          <label className="flex flex-col gap-1.5 text-sm">
+          <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted">
               City <span className="text-gold">*</span>
             </span>
@@ -283,7 +377,7 @@ export default function LootCalculator() {
               value={city}
               onChange={(event) => setCity(event.target.value as City | "")}
               aria-invalid={city === ""}
-              className={`min-h-11 rounded-lg border bg-surface-raised px-3 outline-none focus:ring-2 focus:ring-gold/40 ${
+              className={`${fieldClass} ${
                 city === "" ? "border-gold-dim text-muted" : "border-border-soft text-foreground"
               }`}
             >
@@ -296,12 +390,12 @@ export default function LootCalculator() {
             </select>
           </label>
 
-          <label className="flex flex-col gap-1.5 text-sm">
+          <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted">Price basis</span>
             <select
               value={priceBasis}
               onChange={(event) => setPriceBasis(event.target.value as PriceBasis)}
-              className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-3 text-foreground outline-none focus:ring-2 focus:ring-gold/40"
+              className={fieldClass}
             >
               {Object.entries(PRICE_BASES).map(([id, meta]) => (
                 <option key={id} value={id}>
@@ -311,24 +405,27 @@ export default function LootCalculator() {
             </select>
           </label>
 
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="text-muted">Participants</span>
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="5"
-              value={participants}
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="text-muted">Group runs</span>
+            <select
+              value={runGapMinutes}
               onChange={(event) => {
-                const raw = event.target.value.replace(/^0+(?=\d)/, "");
-                if (isParticipantDraft(raw)) setParticipants(raw);
+                const value = Number(event.target.value);
+                if (isRunGapMinutes(value)) setRunGapMinutes(value);
               }}
-              className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-3 tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40"
-            />
+              className={fieldClass}
+            >
+              {RUN_GAP_OPTIONS.map((option) => (
+                <option key={option.minutes} value={option.minutes}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <label className="flex flex-col gap-1.5 text-sm">
+        <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted">Repair cost</span>
             <input
               type="text"
@@ -341,11 +438,11 @@ export default function LootCalculator() {
                   setRepairCost(raw);
                 }
               }}
-              className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-3 tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40"
+              className={fieldClass}
             />
           </label>
 
-          <label className="flex flex-col gap-1.5 text-sm">
+          <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted">Seller buffer tax</span>
             <div className="relative">
               <input
@@ -357,15 +454,15 @@ export default function LootCalculator() {
                   const raw = event.target.value.replace(/^0+(?=\d)/, "");
                   if (isPercentDraft(raw)) setSellerTax(raw);
                 }}
-                className="min-h-11 w-full rounded-lg border border-border-soft bg-surface-raised px-3 pr-8 tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40"
+                className={`${fieldClass} w-full pr-7`}
               />
-              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted">
+              <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-muted">
                 %
               </span>
             </div>
           </label>
 
-          <label className="flex flex-col gap-1.5 text-sm">
+          <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted">Guild tax</span>
             <div className="relative">
               <input
@@ -377,22 +474,22 @@ export default function LootCalculator() {
                   const raw = event.target.value.replace(/^0+(?=\d)/, "");
                   if (isPercentDraft(raw)) setGuildTax(raw);
                 }}
-                className="min-h-11 w-full rounded-lg border border-border-soft bg-surface-raised px-3 pr-8 tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40"
+                className={`${fieldClass} w-full pr-7`}
               />
-              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted">
+              <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-muted">
                 %
               </span>
             </div>
           </label>
 
-          <fieldset className="flex flex-col gap-1.5 text-sm">
+          <fieldset className="flex flex-col gap-1 text-xs">
             <legend className="text-muted">Sellers Account</legend>
-            <div className="grid grid-cols-2 gap-1 rounded-lg border border-border-soft bg-surface-raised p-1">
+            <div className="grid grid-cols-2 gap-0.5 rounded-md border border-border-soft bg-surface-raised p-0.5">
               <button
                 type="button"
                 aria-pressed={premium}
                 onClick={() => setPremium(true)}
-                className={`min-h-9 rounded-md px-2 text-sm font-medium transition-colors ${
+                className={`min-h-7 rounded-sm px-2 text-xs font-medium transition-colors ${
                   premium ? "bg-gold text-background" : "text-muted hover:text-foreground"
                 }`}
               >
@@ -402,7 +499,7 @@ export default function LootCalculator() {
                 type="button"
                 aria-pressed={!premium}
                 onClick={() => setPremium(false)}
-                className={`min-h-9 rounded-md px-2 text-sm font-medium transition-colors ${
+                className={`min-h-7 rounded-sm px-2 text-xs font-medium transition-colors ${
                   !premium ? "bg-gold text-background" : "text-muted hover:text-foreground"
                 }`}
               >
@@ -412,50 +509,18 @@ export default function LootCalculator() {
           </fieldset>
         </div>
 
-        <p className="mt-2 text-xs text-muted">
-          Repair is silver. Seller buffer tax and guild tax are optional percents of gross.
+        <p className="mt-1.5 text-[11px] leading-snug text-muted">
+          Repair is silver. Seller buffer and guild tax are optional percents of gross.{" "}
+          {PRICE_BASES[priceBasis].hint} Buy orders are never used. Repair is deducted in full from every
+          run. Loot more than the group window apart starts a new run.
         </p>
 
-        <p className="mt-2 text-xs text-muted">
-          {PRICE_BASES[priceBasis].hint} Where the basis has no data the other sources fill in,
-          labelled per row; anything still unpriced can be entered by hand. Buy orders are never
-          used — a standing lowball offer is not what an item is worth.
-        </p>
-
-        <div className="mt-4">
-          <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm text-muted">
-            <input
-              type="checkbox"
-              checked={useNames}
-              onChange={(event) => setUseNames(event.target.checked)}
-              className="size-4 accent-[var(--gold)]"
-            />
-            Enter participant names
-          </label>
-
-          {useNames && (
-            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {Array.from({ length: Math.max(participantCount, 1) }, (_, index) => (
-                <input
-                  key={index}
-                  type="text"
-                  maxLength={40}
-                  value={names[index] ?? ""}
-                  onChange={(event) => updateName(index, event.target.value)}
-                  placeholder={`Player ${index + 1}`}
-                  className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-gold/40"
-                />
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="mt-6 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-1.5">
           <button
             type="button"
             onClick={calculate}
             disabled={busy}
-            className="min-h-12 flex-1 rounded-lg bg-gold px-6 text-base font-semibold text-background transition-opacity hover:opacity-90 disabled:opacity-60 sm:flex-none"
+            className="min-h-8 flex-1 rounded-md bg-gold px-4 text-sm font-semibold text-background transition-opacity hover:opacity-90 disabled:opacity-60 sm:flex-none"
           >
             {busy ? "Calculating…" : result ? "Recalculate" : "Calculate Value"}
           </button>
@@ -463,16 +528,152 @@ export default function LootCalculator() {
             type="button"
             onClick={clearAll}
             disabled={busy}
-            className="min-h-12 rounded-lg border border-border-soft bg-surface-raised px-6 text-sm font-medium text-foreground transition-colors hover:border-gold-dim disabled:opacity-50"
+            className="min-h-8 rounded-md border border-border-soft bg-surface-raised px-3 text-xs font-medium text-foreground transition-colors hover:border-gold-dim disabled:opacity-50"
           >
             Clear
           </button>
         </div>
 
         {error && (
-          <p role="alert" className="mt-4 rounded-lg border border-danger/40 bg-danger/5 p-3 text-sm text-danger">
+          <p role="alert" className="mt-2 rounded-md border border-danger/40 bg-danger/5 p-2 text-xs text-danger">
             ❌ {error}
           </p>
+        )}
+
+        {runCount(layout) > 0 && (
+          <div
+            className="mt-3 flex flex-col gap-3"
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              const raw =
+                event.dataTransfer.getData("application/x-ao-stack") ||
+                event.dataTransfer.getData("text/plain");
+              let payload: { runIndex: number; key: string } | null = null;
+              try {
+                payload = JSON.parse(raw) as { runIndex: number; key: string };
+              } catch {
+                payload = null;
+              }
+              if (!payload) return;
+              const hit = document
+                .elementFromPoint(event.clientX, event.clientY)
+                ?.closest("[data-run-slot]");
+              if (!(hit instanceof HTMLElement)) return;
+              const toRun = Number(hit.dataset.runSlot);
+              if (!Number.isInteger(toRun)) return;
+              setLayout((previous) =>
+                moveStack(previous, parsedRows, payload.runIndex, toRun, payload.key),
+              );
+            }}
+          >
+            {Array.from({ length: runCount(layout) }, (_, index) => {
+              const draft = draftAt(index);
+              const count = parseParticipantsField(draft.participants);
+              const assigned = parsedRows
+                .filter((row) => layout.lineRun[row.line] === index)
+                .sort(compareChestRows);
+              const heading =
+                assigned.length === 0
+                  ? `Run ${index + 1}`
+                  : runHeading({
+                      index: index + 1,
+                      startedAt: assigned[0].date,
+                      endedAt: assigned[assigned.length - 1].date,
+                    });
+              const tableItems = tableItemsForRun(parsedRows, layout, index, result);
+              return (
+                <div
+                  key={index}
+                  data-run-slot={index}
+                  className="rounded-md border border-border-soft bg-surface p-1.5"
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const raw =
+                      event.dataTransfer.getData("application/x-ao-stack") ||
+                      event.dataTransfer.getData("text/plain");
+                    let payload: { runIndex: number; key: string } | null = null;
+                    try {
+                      payload = JSON.parse(raw) as { runIndex: number; key: string };
+                    } catch {
+                      payload = null;
+                    }
+                    if (!payload) return;
+                    setLayout((previous) =>
+                      moveStack(previous, parsedRows, payload.runIndex, index, payload.key),
+                    );
+                  }}
+                >
+                  <p className="text-xs font-medium text-foreground">{heading}</p>
+                  <div className="mt-1.5 flex flex-col gap-1">
+                    <label className="flex max-w-40 flex-col gap-0.5 text-[11px]">
+                      <span className="text-muted">Participants</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={draft.participants}
+                        onChange={(event) => {
+                          const raw = event.target.value.replace(/^0+(?=\d)/, "");
+                          if (isParticipantDraft(raw)) patchRun(index, { participants: raw });
+                        }}
+                        className={nameFieldClass}
+                      />
+                    </label>
+                    {count >= 1 && (
+                      <div className="flex max-w-44 flex-col gap-1">
+                        {Array.from({ length: count }, (_, nameIndex) => (
+                          <input
+                            key={nameIndex}
+                            type="text"
+                            maxLength={40}
+                            value={draft.names[nameIndex] ?? ""}
+                            onChange={(event) => {
+                              const names = [...draft.names];
+                              names[nameIndex] = event.target.value;
+                              patchRun(index, { names });
+                            }}
+                            placeholder={`Player ${nameIndex + 1}`}
+                            className={nameFieldClass}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-2">
+                    <ItemTable
+                      items={tableItems}
+                      overrides={overrides}
+                      onOverrideChange={updateOverride}
+                      runIndex={index}
+                      onMoveStack={(fromRun, key, toRun, beforeKey) => {
+                        setLayout((previous) =>
+                          moveStack(previous, parsedRows, fromRun, toRun, key, beforeKey),
+                        );
+                      }}
+                      onReorder={(key, beforeKey) => {
+                        setLayout((previous) =>
+                          reorderStack(previous, parsedRows, index, key, beforeKey),
+                        );
+                      }}
+                      onToggleExclude={(key) => {
+                        setLayout((previous) =>
+                          toggleStackExcluded(previous, parsedRows, index, key),
+                        );
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </section>
 
@@ -482,7 +683,6 @@ export default function LootCalculator() {
             result={result}
             deductions={deductions}
             overrides={overrides}
-            onOverrideChange={updateOverride}
             onExportJson={exportJson}
             onRetryPrices={calculate}
             busy={busy}

@@ -97,6 +97,8 @@ export interface AggregatedEntry {
   amount: number;
   players: string[];
   lines: number[];
+  /** Earliest chest-log timestamp in the stack. */
+  lootDate?: string;
 }
 
 export interface ResolvedEntry extends AggregatedEntry {
@@ -141,6 +143,10 @@ export interface PricedItem {
    * disagree enough to be worth showing.
    */
   crossCheck?: { label: string; price: number };
+  /** Chest-log line numbers that make up this stack. */
+  lines?: number[];
+  /** Earliest chest-log timestamp in the stack. */
+  lootDate?: string;
 }
 
 /** Resolved, but the market has no usable order (FR-16). */
@@ -152,6 +158,8 @@ export interface MissingPriceItem {
   amount: number;
   reason: string;
   players: string[];
+  lines?: number[];
+  lootDate?: string;
 }
 
 export interface ParticipantShare {
@@ -202,4 +210,32 @@ export interface CalculationResult {
   };
   /** Non-fatal problems, e.g. a partially failed market lookup. */
   warnings: string[];
+  /** Fights grouped from the chest log. Present on chest-log calculate results. */
+  runs?: LootRunResult[];
+}
+
+export interface LootRunResult {
+  index: number;
+  startedAt: string;
+  endedAt: string;
+  totalValue: number;
+  netValue: number;
+  repairCost: number;
+  sellerTaxPercent: number;
+  guildTaxPercent: number;
+  premium: boolean;
+  marketSetupPercent: number;
+  marketTaxPercent: number;
+  sellerFee: number;
+  guildFee: number;
+  marketSetupFee: number;
+  marketTaxFee: number;
+  marketFee: number;
+  participants: number;
+  share: number;
+  remainder: number;
+  participantShares: ParticipantShare[];
+  items: PricedItem[];
+  unresolvedItems: UnresolvedEntry[];
+  missingPrices: MissingPriceItem[];
 }

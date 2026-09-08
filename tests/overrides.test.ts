@@ -139,9 +139,21 @@ describe("applyManualPrices", () => {
     expect(updated.remainder).toBe(3);
   });
 
-  it("ignores blank, zero, negative and non-numeric entries", () => {
+  it("treats a typed zero as a real manual price", () => {
+    const key = overrideKey({ itemId: "T4_BAG@1", quality: 4 });
+    const updated = applyManualPrices(result(), { [key]: 0 }, AT);
+    expect(updated.items[0]).toMatchObject({
+      itemId: "T4_BAG@1",
+      unitPrice: 0,
+      totalValue: 0,
+      source: "manual",
+    });
+    expect(updated.totalValue).toBe(0);
+  });
+
+  it("ignores negative and non-numeric entries", () => {
     const key = overrideKey({ itemId: "T4_2H_DAGGERPAIR@2", quality: 4 });
-    for (const value of [0, -5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    for (const value of [-5, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(applyManualPrices(result(), { [key]: value }, AT).totalValue).toBe(100_000);
     }
   });

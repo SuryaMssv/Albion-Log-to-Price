@@ -34,6 +34,47 @@ export function enchantmentLabel(enchantment: number): string {
   return enchantment > 0 ? `.${enchantment}` : "-";
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+
+function formatTwelveHour(hour24: number, minute: number): string {
+  const period = hour24 >= 12 ? "pm" : "am";
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
+}
+
+/**
+ * Chest-log stamps (`MM/DD/YYYY HH:MM:SS`) are UTC.
+ * Display: `6/Sep/26 11:52 am [5:22 pm]` — UTC 12-hour, IST in brackets.
+ * Seconds are dropped. Unparseable values are returned unchanged.
+ */
+export function formatChestStamp(raw: string): string {
+  const match = raw
+    .trim()
+    .match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!match) return raw;
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  const year = Number(match[3]);
+  const monthName = MONTHS[month - 1];
+  if (!monthName || day < 1 || day > 31) return raw;
+  const datePart = `${day}/${monthName}/${String(year).slice(-2)}`;
+  if (match[4] === undefined) return datePart;
+  const utcHour = Number(match[4]);
+  const utcMinute = Number(match[5]);
+  const utcClock = formatTwelveHour(utcHour, utcMinute);
+  const ist = new Date(Date.UTC(year, month - 1, day, utcHour, utcMinute) + IST_OFFSET_MS);
+  const istClock = formatTwelveHour(ist.getUTCHours(), ist.getUTCMinutes());
+  return `${datePart} ${utcClock} [${istClock}]`;
+}
+
+/** In-game render of this item id at this quality (enchantment lives on the id as `@N`). */
+export function itemIconUrl(itemId: string, quality: number): string {
+  const clamped = Math.min(5, Math.max(1, Math.round(quality)));
+  return `https://render.albiononline.com/v1/item/${itemId}.png?quality=${clamped}`;
+}
+
 /** 4 -> "4", 2.5 -> "2.5" */
 export function formatPercent(value: number): string {
   return Number.parseFloat(value.toPrecision(12)).toString();

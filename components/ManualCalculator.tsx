@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHistory } from "./HistoryContext";
+import JsonUploadButton from "./JsonUploadButton";
 import { computeManualSplit } from "@/lib/deductions";
 import { buildManualDiscordMessage } from "@/lib/discord";
 import { buildExportJson, downloadJson } from "@/lib/export";
@@ -15,24 +16,24 @@ import {
   parseSilverField,
 } from "@/lib/fields";
 import { formatCompact, formatNetBreakdown, formatSilver } from "@/lib/format";
-import { newHistoryId, snapshotFromResult } from "@/lib/history";
+import { newHistoryId, snapshotFromResult, type HistoryEntry } from "@/lib/history";
 
 const fieldClass =
-  "min-h-11 rounded-lg border border-border-soft bg-surface-raised px-3 tabular-nums text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40";
+  "min-h-8 rounded-md border border-border-soft bg-surface-raised px-2.5 tabular-nums text-sm text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40";
 
 const SAVE_DEBOUNCE_MS = 500;
 
 export default function ManualCalculator() {
-  const { upsert, registerRestore } = useHistory();
+  const { upsert, registerRestore, open } = useHistory();
   const [gross, setGross] = useState("");
   const [repairCost, setRepairCost] = useState("");
   const [sellerTax, setSellerTax] = useState("");
   const [guildTax, setGuildTax] = useState("");
   const [premium, setPremium] = useState(true);
-  const [participants, setParticipants] = useState("5");
-  const [useNames, setUseNames] = useState(false);
+  const [participants, setParticipants] = useState("");
   const [names, setNames] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const entryIdRef = useRef<string | null>(null);
   const skipNextSave = useRef(false);
 
@@ -46,7 +47,6 @@ export default function ManualCalculator() {
       setGuildTax(entry.inputs.guildTax);
       setPremium(entry.inputs.premium);
       setParticipants(entry.inputs.participants);
-      setUseNames(entry.inputs.useNames);
       setNames(entry.inputs.names);
       entryIdRef.current = entry.id;
     });
@@ -62,9 +62,9 @@ export default function ManualCalculator() {
       guildTaxPercent: parsePercentField(guildTax),
       premium,
       participants: participantCount,
-      names: useNames ? names : [],
+      names,
     });
-  }, [gross, repairCost, sellerTax, guildTax, premium, participantCount, useNames, names]);
+  }, [gross, repairCost, sellerTax, guildTax, premium, participantCount, names]);
 
   const persist = useCallback(() => {
     if (!split || parseSilverField(gross) <= 0) return;
@@ -80,12 +80,12 @@ export default function ManualCalculator() {
         guildTax,
         premium,
         participants,
-        useNames,
+        useNames: true,
         names,
       },
       snapshot: snapshotFromResult(split),
     });
-  }, [split, gross, repairCost, sellerTax, guildTax, premium, participants, useNames, names, upsert]);
+  }, [split, gross, repairCost, sellerTax, guildTax, premium, participants, names, upsert]);
 
   useEffect(() => {
     if (parseSilverField(gross) <= 0) return;
@@ -112,10 +112,16 @@ export default function ManualCalculator() {
     setGuildTax("");
     setPremium(true);
     setParticipants("5");
-    setUseNames(false);
     setNames([]);
     setCopied(false);
+    setError(null);
     entryIdRef.current = null;
+  }
+
+  function importJson(entry: HistoryEntry) {
+    setError(null);
+    upsert(entry);
+    open(entry);
   }
 
   async function copyDiscord() {
@@ -138,18 +144,15 @@ export default function ManualCalculator() {
   const grossValue = parseSilverField(gross);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h2 className="text-lg font-semibold text-foreground">⚔️ Gank Loot</h2>
-        <p className="mt-1 text-sm text-muted">
-          Type the figures from a Discord split — no chest log needed. Net and each-player shares
-          update as you edit.
-        </p>
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] text-muted">Type Discord totals — no chest log. Shares update as you edit.</p>
+        <JsonUploadButton onLoaded={importJson} onError={setError} />
       </div>
 
-      <section className="rounded-2xl border border-border-soft bg-surface/60 p-4 sm:p-6">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <label className="flex flex-col gap-1.5 text-sm sm:col-span-2 lg:col-span-1">
+      <section className="rounded-xl border border-border-soft bg-surface/60 p-3">
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
+          <label className="flex flex-col gap-1 text-xs sm:col-span-2 lg:col-span-1">
             <span className="text-muted">Gross market value</span>
             <input
               type="text"
@@ -166,7 +169,7 @@ export default function ManualCalculator() {
             />
           </label>
 
-          <label className="flex flex-col gap-1.5 text-sm">
+          <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted">Repair cost</span>
             <input
               type="text"
@@ -183,7 +186,7 @@ export default function ManualCalculator() {
             />
           </label>
 
-          <label className="flex flex-col gap-1.5 text-sm">
+          <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted">Seller buffer tax</span>
             <div className="relative">
               <input
@@ -195,15 +198,15 @@ export default function ManualCalculator() {
                   const raw = event.target.value.replace(/^0+(?=\d)/, "");
                   if (isPercentDraft(raw)) setSellerTax(raw);
                 }}
-                className={`${fieldClass} w-full pr-8`}
+                className={`${fieldClass} w-full pr-7`}
               />
-              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted">
+              <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-muted">
                 %
               </span>
             </div>
           </label>
 
-          <label className="flex flex-col gap-1.5 text-sm">
+          <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted">Guild tax</span>
             <div className="relative">
               <input
@@ -215,20 +218,19 @@ export default function ManualCalculator() {
                   const raw = event.target.value.replace(/^0+(?=\d)/, "");
                   if (isPercentDraft(raw)) setGuildTax(raw);
                 }}
-                className={`${fieldClass} w-full pr-8`}
+                className={`${fieldClass} w-full pr-7`}
               />
-              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted">
+              <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-muted">
                 %
               </span>
             </div>
           </label>
 
-          <label className="flex flex-col gap-1.5 text-sm">
+          <label className="flex flex-col gap-1 text-xs">
             <span className="text-muted">Participants</span>
             <input
               type="text"
               inputMode="numeric"
-              placeholder="5"
               value={participants}
               onChange={(event) => {
                 const raw = event.target.value.replace(/^0+(?=\d)/, "");
@@ -238,14 +240,14 @@ export default function ManualCalculator() {
             />
           </label>
 
-          <fieldset className="flex flex-col gap-1.5 text-sm">
+          <fieldset className="flex flex-col gap-1 text-xs">
             <legend className="text-muted">Sellers Account</legend>
-            <div className="grid grid-cols-2 gap-1 rounded-lg border border-border-soft bg-surface-raised p-1">
+            <div className="grid grid-cols-2 gap-0.5 rounded-md border border-border-soft bg-surface-raised p-0.5">
               <button
                 type="button"
                 aria-pressed={premium}
                 onClick={() => setPremium(true)}
-                className={`min-h-9 rounded-md px-2 text-sm font-medium transition-colors ${
+                className={`min-h-7 rounded-sm px-2 text-xs font-medium transition-colors ${
                   premium ? "bg-gold text-background" : "text-muted hover:text-foreground"
                 }`}
               >
@@ -255,7 +257,7 @@ export default function ManualCalculator() {
                 type="button"
                 aria-pressed={!premium}
                 onClick={() => setPremium(false)}
-                className={`min-h-9 rounded-md px-2 text-sm font-medium transition-colors ${
+                className={`min-h-7 rounded-sm px-2 text-xs font-medium transition-colors ${
                   !premium ? "bg-gold text-background" : "text-muted hover:text-foreground"
                 }`}
               >
@@ -265,41 +267,29 @@ export default function ManualCalculator() {
           </fieldset>
         </div>
 
-        <p className="mt-2 text-xs text-muted">
-          Repair is silver. Seller buffer tax and guild tax are optional percents of gross. Market
-          is 6.5% premium or 10.5% non-premium.
+        <p className="mt-1.5 text-[11px] leading-snug text-muted">
+          Repair is silver. Seller buffer and guild tax are optional percents of gross. Market is
+          6.5% premium or 10.5% non-premium.
         </p>
 
-        <div className="mt-4">
-          <label className="inline-flex min-h-11 cursor-pointer items-center gap-2 text-sm text-muted">
-            <input
-              type="checkbox"
-              checked={useNames}
-              onChange={(event) => setUseNames(event.target.checked)}
-              className="size-4 accent-gold"
-            />
-            Enter participant names
-          </label>
-
-          {useNames && (
-            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {Array.from({ length: Math.max(participantCount, 1) }, (_, index) => (
-                <input
-                  key={index}
-                  type="text"
-                  maxLength={40}
-                  value={names[index] ?? ""}
-                  onChange={(event) => updateName(index, event.target.value)}
-                  placeholder={`Player ${index + 1}`}
-                  className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-gold/40"
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        {participantCount >= 1 && (
+          <div className="mt-2 flex max-w-44 flex-col gap-1">
+            {Array.from({ length: participantCount }, (_, index) => (
+              <input
+                key={index}
+                type="text"
+                maxLength={40}
+                value={names[index] ?? ""}
+                onChange={(event) => updateName(index, event.target.value)}
+                placeholder={`Player ${index + 1}`}
+                className="min-h-6 rounded-sm border border-border-soft bg-surface-raised px-1.5 text-xs text-foreground outline-none placeholder:text-muted/50 focus:ring-2 focus:ring-gold/40"
+              />
+            ))}
+          </div>
+        )}
       </section>
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-2 sm:grid-cols-3">
         <StatCard
           label="💰 Gross Market Value"
           value={formatSilver(grossValue)}
@@ -335,12 +325,12 @@ export default function ManualCalculator() {
 
       {split && (
         <section>
-          <h3 className="mb-2 text-sm font-semibold text-foreground">Participant shares</h3>
-          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <h3 className="mb-1.5 text-xs font-semibold text-foreground">Participant shares</h3>
+          <ul className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
             {split.participantShares.map((participant, index) => (
               <li
                 key={index}
-                className="flex items-center justify-between rounded-lg border border-border-soft bg-surface px-4 py-3 text-sm"
+                className="flex items-center justify-between rounded-md border border-border-soft bg-surface px-3 py-1.5 text-xs"
               >
                 <span className="truncate text-foreground">{participant.name}</span>
                 <span className="ml-3 shrink-0 tabular-nums text-gold">
@@ -352,12 +342,12 @@ export default function ManualCalculator() {
         </section>
       )}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         <button
           type="button"
           onClick={copyDiscord}
           disabled={!split}
-          className="min-h-11 flex-1 rounded-lg bg-gold px-5 text-sm font-semibold text-background transition-opacity hover:opacity-90 disabled:opacity-50 sm:flex-none"
+          className="min-h-8 flex-1 rounded-md bg-gold px-3 text-xs font-semibold text-background transition-opacity hover:opacity-90 disabled:opacity-50 sm:flex-none"
         >
           {copied ? "Copied ✓" : "Copy Discord Result"}
         </button>
@@ -379,7 +369,7 @@ export default function ManualCalculator() {
                   guildTax,
                   premium,
                   participants,
-                  useNames,
+                  useNames: true,
                   names,
                 },
                 snapshot: snapshotFromResult(split),
@@ -387,28 +377,34 @@ export default function ManualCalculator() {
             );
           }}
           disabled={!split || parseSilverField(gross) <= 0}
-          className="min-h-11 flex-1 rounded-lg border border-border-soft bg-surface-raised px-5 text-sm font-medium text-foreground transition-colors hover:border-gold-dim disabled:opacity-50 sm:flex-none"
+          className="min-h-8 flex-1 rounded-md border border-border-soft bg-surface-raised px-3 text-xs font-medium text-foreground transition-colors hover:border-gold-dim disabled:opacity-50 sm:flex-none"
         >
           Export JSON
         </button>
         <button
           type="button"
           onClick={clearAll}
-          className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-5 text-sm font-medium text-foreground transition-colors hover:border-gold-dim"
+          className="min-h-8 rounded-md border border-border-soft bg-surface-raised px-3 text-xs font-medium text-foreground transition-colors hover:border-gold-dim"
         >
           Clear
         </button>
       </div>
+
+      {error && (
+        <p role="alert" className="rounded-md border border-danger/40 bg-danger/5 p-2 text-xs text-danger">
+          ❌ {error}
+        </p>
+      )}
     </div>
   );
 }
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-xl border border-border-soft bg-surface p-4 sm:p-5">
-      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums text-gold sm:text-3xl">{value}</p>
-      {sub && <p className="mt-1 text-xs text-muted">{sub}</p>}
+    <div className="rounded-lg border border-border-soft bg-surface p-3">
+      <p className="text-[10px] uppercase tracking-wide text-muted">{label}</p>
+      <p className="mt-0.5 text-xl font-semibold tabular-nums text-gold">{value}</p>
+      {sub && <p className="mt-0.5 text-[11px] text-muted">{sub}</p>}
     </div>
   );
 }

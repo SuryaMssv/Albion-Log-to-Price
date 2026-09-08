@@ -1,6 +1,6 @@
 import { computeSplit, buildParticipantShares, itemValue } from "./calculator";
-import { applyDeductions } from "./deductions";
-import type { CalculationResult, MissingPriceItem, PricedItem } from "./types";
+import { applyDeductions, rollupRuns } from "./deductions";
+import type { CalculationResult, LootRunResult, MissingPriceItem, PricedItem } from "./types";
 
 /** Overrides are keyed the same way market quotes are: `${itemId}|${quality}`. */
 export function overrideKey(item: { itemId: string; quality: number }): string {
@@ -25,7 +25,48 @@ function toPricedItem(item: MissingPriceItem, unitPrice: number, city: string, a
 }
 
 function isUsablePrice(value: number | undefined): value is number {
-  return Number.isFinite(value) && (value as number) > 0;
+  return Number.isFinite(value) && (value as number) >= 0;
+}
+
+function applyOverridesToItems(
+  items: PricedItem[],
+  missingPrices: MissingPriceItem[],
+  overrides: Record<string, number>,
+  city: string,
+  at: string,
+): { items: PricedItem[]; missingPrices: MissingPriceItem[]; changed: boolean } {
+  const applied: PricedItem[] = [];
+  const stillMissing: MissingPriceItem[] = [];
+
+  for (const item of missingPrices) {
+    const unitPrice = overrides[overrideKey(item)];
+    if (isUsablePrice(unitPrice)) {
+      applied.push(toPricedItem(item, Math.round(unitPrice), city, at));
+    } else {
+      stillMissing.push(item);
+    }
+  }
+
+  let repricedAny = false;
+  const reprised = items.map((item) => {
+    const unitPrice = overrides[overrideKey(item)];
+    if (!isUsablePrice(unitPrice) || Math.round(unitPrice) === item.unitPrice) return item;
+    repricedAny = true;
+    const rounded = Math.round(unitPrice);
+    return {
+      ...item,
+      unitPrice: rounded,
+      totalValue: itemValue(rounded, item.amount),
+      source: "manual" as const,
+      priceDate: at,
+      stale: false,
+      saleCount: undefined,
+    };
+  });
+
+  const changed = applied.length > 0 || repricedAny;
+  const nextItems = [...reprised, ...applied].sort((a, b) => b.totalValue - a.totalValue);
+  return { items: nextItems, missingPrices: stillMissing, changed };
 }
 
 /**
@@ -42,48 +83,56 @@ export function applyManualPrices(
   overrides: Record<string, number>,
   at: string = new Date().toISOString(),
 ): CalculationResult {
-  const applied: PricedItem[] = [];
-  const stillMissing: MissingPriceItem[] = [];
+  const deductions = {
+    repairCost: result.repairCost,
+    sellerTaxPercent: result.sellerTaxPercent,
+    guildTaxPercent: result.guildTaxPercent,
+    premium: result.premium,
+  };
 
-  for (const item of result.missingPrices) {
-    const unitPrice = overrides[overrideKey(item)];
-    if (isUsablePrice(unitPrice)) {
-      applied.push(toPricedItem(item, Math.round(unitPrice), result.city, at));
-    } else {
-      stillMissing.push(item);
-    }
+  if (result.runs && result.runs.length > 0) {
+    let any = false;
+    const runs: LootRunResult[] = result.runs.map((run) => {
+      const next = applyOverridesToItems(run.items, run.missingPrices, overrides, result.city, at);
+      if (!next.changed) return run;
+      any = true;
+      const total = next.items.reduce((sum, item) => sum + item.totalValue, 0);
+      return { ...run, items: next.items, missingPrices: next.missingPrices, totalValue: total };
+    });
+    if (!any) return result;
+    return applyDeductions(
+      rollupRuns(
+        {
+          parseErrors: result.parseErrors,
+          priceBasis: result.priceBasis,
+          server: result.server,
+          city: result.city,
+          stats: {
+            ...result.stats,
+            itemsPriced: runs.reduce((sum, run) => sum + run.items.length, 0),
+          },
+          warnings: result.warnings,
+        },
+        runs,
+        deductions,
+      ),
+      deductions,
+    );
   }
 
-  let repricedAny = false;
-  const reprised = result.items.map((item) => {
-    const unitPrice = overrides[overrideKey(item)];
-    if (!isUsablePrice(unitPrice) || Math.round(unitPrice) === item.unitPrice) return item;
-    repricedAny = true;
-    const rounded = Math.round(unitPrice);
-    return {
-      ...item,
-      unitPrice: rounded,
-      totalValue: itemValue(rounded, item.amount),
-      source: "manual" as const,
-      priceDate: at,
-      stale: false,
-      saleCount: undefined,
-    };
-  });
+  const next = applyOverridesToItems(result.items, result.missingPrices, overrides, result.city, at);
+  if (!next.changed) return result;
 
-  if (applied.length === 0 && !repricedAny) return result;
-
-  const items = [...reprised, ...applied].sort((a, b) => b.totalValue - a.totalValue);
-  const totalValue = items.reduce((sum, item) => sum + item.totalValue, 0);
-  const { share, remainder } = computeSplit(totalValue, result.participants);
+  const total = next.items.reduce((sum, item) => sum + item.totalValue, 0);
+  const { share, remainder } = computeSplit(total, result.participants);
 
   return applyDeductions(
     {
       ...result,
-      items,
-      missingPrices: stillMissing,
-      totalValue,
-      netValue: totalValue,
+      items: next.items,
+      missingPrices: next.missingPrices,
+      totalValue: total,
+      netValue: total,
       share,
       remainder,
       participantShares: buildParticipantShares(
@@ -91,13 +140,8 @@ export function applyManualPrices(
         share,
         result.participantShares.map((participant) => participant.name),
       ),
-      stats: { ...result.stats, itemsPriced: items.length },
+      stats: { ...result.stats, itemsPriced: next.items.length },
     },
-    {
-      repairCost: result.repairCost,
-      sellerTaxPercent: result.sellerTaxPercent,
-      guildTaxPercent: result.guildTaxPercent,
-      premium: result.premium,
-    },
+    deductions,
   );
 }

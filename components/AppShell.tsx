@@ -34,18 +34,18 @@ export default function AppShell({ itemNames, generatedAt }: AppShellProps) {
     <HistoryProvider onOpen={handleOpen}>
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
         <header className="shrink-0 border-b border-border-soft bg-background/95 backdrop-blur">
-          <div className="mx-auto w-full max-w-5xl px-4 sm:px-6">
-            <div className="flex items-baseline gap-2 py-2">
-              <h1 className="text-base font-bold tracking-tight text-foreground sm:text-lg">
+          <div className="mx-auto w-full max-w-5xl px-3 sm:px-4">
+            <div className="flex items-baseline gap-2 py-1.5">
+              <h1 className="text-sm font-bold tracking-tight text-foreground sm:text-base">
                 ⚔️ Albion Guild Loot Calculator
               </h1>
-              <p className="text-xs text-gold">by suryamssv</p>
+              <p className="text-[11px] text-gold">by suryamssv</p>
             </div>
 
             <div
               role="tablist"
               aria-label="Mode"
-              className="mb-2 grid grid-cols-3 gap-1 rounded-lg border border-border-soft bg-surface-raised p-1"
+              className="mb-1.5 grid grid-cols-3 gap-0.5 rounded-md border border-border-soft bg-surface-raised p-0.5"
             >
               <TabButton
                 id="tab-chest-log"
@@ -77,7 +77,7 @@ export default function AppShell({ itemNames, generatedAt }: AppShellProps) {
 
         <main
           ref={mainRef}
-          className="mx-auto min-h-0 w-full max-w-5xl flex-1 overflow-y-auto overscroll-y-contain px-4 py-5 sm:px-6"
+          className="mx-auto min-h-0 w-full max-w-5xl flex-1 overflow-y-auto overscroll-y-contain px-3 py-3 sm:px-4"
         >
           <div id="panel-chest-log" role="tabpanel" aria-labelledby="tab-chest-log" hidden={tab !== "chest-log"}>
             <LootCalculator />
@@ -90,7 +90,7 @@ export default function AppShell({ itemNames, generatedAt }: AppShellProps) {
           </div>
         </main>
 
-        <footer className="shrink-0 border-t border-border-soft bg-background/95 px-4 py-2 text-[11px] leading-snug text-muted sm:px-6">
+        <footer className="shrink-0 border-t border-border-soft bg-background/95 px-3 py-1.5 text-[10px] leading-snug text-muted sm:px-4">
           <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-1">
             <p>
               Splits saved only in this browser. Market data from the{" "}
@@ -134,7 +134,7 @@ function TabButton({
       aria-selected={selected}
       tabIndex={selected ? 0 : -1}
       onClick={onSelect}
-      className={`min-h-9 rounded-md px-3 text-sm font-medium transition-colors ${
+      className={`min-h-7 rounded-sm px-2 text-xs font-medium transition-colors ${
         selected ? "bg-gold text-background" : "text-muted hover:text-foreground"
       }`}
     >

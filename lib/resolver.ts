@@ -39,6 +39,15 @@ export function buildItemId(baseId: string, enchantment: number): string {
   return enchantment > 0 ? `${baseId}@${enchantment}` : baseId;
 }
 
+/** Market id for an icon/price lookup, or undefined if the name cannot be resolved. */
+export function itemIdFor(name: string, enchantment: number): string | undefined {
+  const candidates = lookup(name);
+  if (!candidates || candidates.length === 0) return undefined;
+  const [baseId, maxEnchantment] = candidates[0];
+  if (enchantment > maxEnchantment) return undefined;
+  return buildItemId(baseId, enchantment);
+}
+
 /** Lookup with a couple of forgiving fallbacks for hand-edited logs. */
 function lookup(name: string): [string, number][] | undefined {
   const normalized = normalizeName(name);

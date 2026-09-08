@@ -1,19 +1,17 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import ItemTable from "./ItemTable";
-import IssuesPanel from "./IssuesPanel";
 import { applyDeductions, type DeductionsInput } from "@/lib/deductions";
 import { applyManualPrices } from "@/lib/overrides";
-import { buildDiscordMessage } from "@/lib/discord";
+import { buildDiscordMessage, runHeading } from "@/lib/discord";
 import { formatCompact, formatNetBreakdown, formatSilver } from "@/lib/format";
-import { PRICE_BASES, SERVERS, type CalculationResult } from "@/lib/types";
+import { PRICE_BASES, SERVERS, type CalculationResult, type LootRunResult } from "@/lib/types";
+import IssuesPanel from "./IssuesPanel";
 
 interface ResultsPanelProps {
   result: CalculationResult;
   deductions: DeductionsInput;
   overrides: Record<string, number>;
-  onOverrideChange: (key: string, value: number | null) => void;
   onExportJson: () => void;
   onRetryPrices: () => void;
   busy: boolean;
@@ -21,10 +19,10 @@ interface ResultsPanelProps {
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-xl border border-border-soft bg-surface p-4 sm:p-5">
-      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums text-gold sm:text-3xl">{value}</p>
-      {sub && <p className="mt-1 text-xs text-muted">{sub}</p>}
+    <div className="rounded-lg border border-border-soft bg-surface p-3">
+      <p className="text-[10px] uppercase tracking-wide text-muted">{label}</p>
+      <p className="mt-0.5 text-xl font-semibold tabular-nums text-gold">{value}</p>
+      {sub && <p className="mt-0.5 text-[11px] text-muted">{sub}</p>}
     </div>
   );
 }
@@ -33,14 +31,12 @@ export default function ResultsPanel({
   result: rawResult,
   deductions,
   overrides,
-  onOverrideChange,
   onExportJson,
   onRetryPrices,
   busy,
 }: ResultsPanelProps) {
   const [copied, setCopied] = useState(false);
 
-  // Manual prices then deductions: both are pure, so tax/repair edits do not refetch.
   const result = useMemo(
     () => applyDeductions(applyManualPrices(rawResult, overrides), deductions),
     [rawResult, overrides, deductions],
@@ -51,7 +47,6 @@ export default function ResultsPanel({
     try {
       await navigator.clipboard.writeText(message);
     } catch {
-      // Clipboard API is unavailable (insecure context / older mobile browser).
       const area = document.createElement("textarea");
       area.value = message;
       document.body.appendChild(area);
@@ -63,22 +58,24 @@ export default function ResultsPanel({
     setTimeout(() => setCopied(false), 2000);
   }
 
+  const runs = result.runs ?? [];
+  const multiRun = runs.length > 1;
   const excluded = result.unresolvedItems.length + result.missingPrices.length;
   const manualCount = result.items.filter((item) => item.source === "manual").length;
   const saleCount = result.items.filter((item) => item.source === "recent_sale").length;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <div>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 className="text-lg font-semibold text-foreground">⚔️ Gank Loot</h2>
-          <p className="text-xs text-muted">
+          <h2 className="text-sm font-semibold text-foreground">⚔️ Gank Loot</h2>
+          <p className="text-[11px] text-muted">
             Price basis: {SERVERS[result.server].short} — {result.city}{" "}
             {PRICE_BASES[result.priceBasis].short}
           </p>
         </div>
 
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
           <StatCard
             label="💰 Gross Market Value"
             value={`${formatSilver(result.totalValue)}`}
@@ -87,82 +84,100 @@ export default function ResultsPanel({
           <StatCard
             label="💰 Net Distributable"
             value={`${formatSilver(result.netValue)}`}
-            sub={formatNetBreakdown(result)}
+            sub={multiRun ? `${runs.length} runs · full repair on each` : formatNetBreakdown(result)}
           />
           <StatCard
-            label="🪙 Each Player"
-            value={`${formatSilver(result.share)}`}
+            label={multiRun ? "⚔️ Runs" : "🪙 Each Player"}
+            value={multiRun ? String(runs.length) : `${formatSilver(result.share)}`}
             sub={
-              result.remainder > 0
-                ? `${formatSilver(result.remainder)} silver remainder`
-                : "Divides evenly"
+              multiRun
+                ? "Split separately"
+                : result.remainder > 0
+                  ? `${formatSilver(result.remainder)} silver remainder`
+                  : "Divides evenly"
             }
           />
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         <button
           type="button"
           onClick={copyDiscord}
-          className="min-h-11 flex-1 rounded-lg bg-gold px-5 text-sm font-semibold text-background transition-opacity hover:opacity-90 sm:flex-none"
+          className="min-h-8 flex-1 rounded-md bg-gold px-3 text-xs font-semibold text-background transition-opacity hover:opacity-90 sm:flex-none"
         >
           {copied ? "Copied ✓" : "Copy Discord Result"}
         </button>
         <button
           type="button"
           onClick={onExportJson}
-          className="min-h-11 flex-1 rounded-lg border border-border-soft bg-surface-raised px-5 text-sm font-medium text-foreground transition-colors hover:border-gold-dim sm:flex-none"
+          className="min-h-8 flex-1 rounded-md border border-border-soft bg-surface-raised px-3 text-xs font-medium text-foreground transition-colors hover:border-gold-dim sm:flex-none"
         >
           Export JSON
         </button>
       </div>
 
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-foreground">Participant shares</h3>
-        <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {result.participantShares.map((participant, index) => (
-            <li
-              key={index}
-              className="flex items-center justify-between rounded-lg border border-border-soft bg-surface px-4 py-3 text-sm"
-            >
-              <span className="truncate text-foreground">{participant.name}</span>
-              <span className="ml-3 shrink-0 tabular-nums text-gold">
-                {formatSilver(participant.share)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <p className="text-[11px] text-muted">
+        {result.stats.rowsParsed} rows → {result.stats.stacks} stacks
+        {saleCount > 0 && ` · ${saleCount} from recent sales`}
+        {manualCount > 0 && ` · ${manualCount} manual`}
+        {excluded > 0 && ` · ${excluded} excluded`} · market lookup {result.stats.marketMs} ms
+      </p>
 
-      <section>
-        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="text-sm font-semibold text-foreground">Item breakdown</h3>
-          <p className="text-xs text-muted">
-            {result.stats.rowsParsed} rows → {result.stats.stacks} stacks
-            {saleCount > 0 && ` · ${saleCount} from recent sales`}
-            {manualCount > 0 && ` · ${manualCount} manual`}
-            {excluded > 0 && ` · ${excluded} excluded`} · market lookup {result.stats.marketMs} ms
-          </p>
-        </div>
-        <ItemTable
-          items={result.items}
-          overrides={overrides}
-          onOverrideChange={onOverrideChange}
-        />
-      </section>
+      {multiRun
+        ? runs.map((run) => <RunShares key={run.index} run={run} />)
+        : <ShareList shares={result.participantShares} />}
 
-      <IssuesPanel
-        result={result}
-        onRetryPrices={onRetryPrices}
-        busy={busy}
-        overrides={overrides}
-        onOverrideChange={onOverrideChange}
-      />
+      <IssuesPanel result={result} onRetryPrices={onRetryPrices} busy={busy} />
 
-      <p className="text-xs text-muted">
+      <p className="text-[11px] text-muted">
         Net is gross minus repair, seller buffer tax, guild tax, market setup and market tax.
+        {multiRun ? " Repair is deducted in full from every run." : ""} Item tables live with each run
+        above.
       </p>
     </div>
+  );
+}
+
+function ShareList({ shares }: { shares: LootRunResult["participantShares"] }) {
+  return (
+    <section>
+      <h3 className="mb-1.5 text-xs font-semibold text-foreground">Participant shares</h3>
+      <ul className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+        {shares.map((participant, index) => (
+          <li
+            key={index}
+            className="flex items-center justify-between rounded-md border border-border-soft bg-surface px-3 py-1.5 text-xs"
+          >
+            <span className="truncate text-foreground">{participant.name}</span>
+            <span className="ml-3 shrink-0 tabular-nums text-gold">
+              {formatSilver(participant.share)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function RunShares({ run }: { run: LootRunResult }) {
+  return (
+    <section className="rounded-lg border border-border-soft bg-surface/60 p-3">
+      <h3 className="text-xs font-semibold text-foreground">{runHeading(run)}</h3>
+      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+        <StatCard label="💰 Gross" value={formatSilver(run.totalValue)} />
+        <StatCard label="💰 Net" value={formatSilver(run.netValue)} sub={formatNetBreakdown(run)} />
+        <StatCard
+          label="🪙 Each"
+          value={formatSilver(run.share)}
+          sub={
+            run.remainder > 0 ? `${formatSilver(run.remainder)} silver remainder` : "Divides evenly"
+          }
+        />
+      </div>
+      <div className="mt-2">
+        <ShareList shares={run.participantShares} />
+      </div>
+    </section>
   );
 }

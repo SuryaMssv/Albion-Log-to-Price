@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { aggregateRows, parseChestLog, tokenizeLine } from "@/lib/parser";
+import {
+  aggregateRows,
+  clusterRowsIntoRuns,
+  parseChestLog,
+  runGapMs,
+  tokenizeLine,
+} from "@/lib/parser";
 
 const SAMPLE = `"Date" "Player" "Item" "Enchantment" "Quality" "Amount"
 "08/18/2026 11:49:51" "DemiG0Dz" "Adept's Fiend Cowl" "2" "4" "1"
@@ -204,5 +210,83 @@ describe("aggregateRows", () => {
     const stacks = aggregateRows(parseChestLog(log).rows);
     expect(stacks).toHaveLength(1);
     expect(stacks[0].name).toBe("Major Sticky Potion");
+  });
+});
+
+describe("clusterRowsIntoRuns", () => {
+  function rows(lines: string[]): ReturnType<typeof parseChestLog>["rows"] {
+    return parseChestLog(lines.join("\n")).rows;
+  }
+
+  it("keeps loot within 10 minutes in one run", () => {
+    const clustered = clusterRowsIntoRuns(
+      rows([
+        `"08/18/2026 11:49:00" "A" "Adept's Bag" "1" "4" "1"`,
+        `"08/18/2026 11:58:00" "A" "Adept's Cape" "1" "4" "1"`,
+      ]),
+    );
+    expect(clustered).toHaveLength(1);
+    expect(clustered[0].rows).toHaveLength(2);
+    expect(clustered[0].startedAt).toBe("08/18/2026 11:49:00");
+    expect(clustered[0].endedAt).toBe("08/18/2026 11:58:00");
+  });
+
+  it("starts a new run when the gap is more than 10 minutes", () => {
+    const clustered = clusterRowsIntoRuns(
+      rows([
+        `"08/18/2026 11:49:00" "A" "Adept's Bag" "1" "4" "1"`,
+        `"08/18/2026 11:58:00" "A" "Adept's Cape" "1" "4" "1"`,
+        `"08/18/2026 12:10:00" "B" "Adept's Fiend Cowl" "2" "4" "1"`,
+        `"08/18/2026 14:00:00" "C" "Invisibility Potion" "0" "1" "1"`,
+      ]),
+    );
+    expect(clustered.map((run) => run.rows.map((row) => row.item))).toEqual([
+      ["Adept's Bag", "Adept's Cape"],
+      ["Adept's Fiend Cowl"],
+      ["Invisibility Potion"],
+    ]);
+  });
+
+  it("treats an exact 10-minute gap as the same run", () => {
+    const clustered = clusterRowsIntoRuns(
+      rows([
+        `"08/18/2026 11:49:00" "A" "Adept's Bag" "1" "4" "1"`,
+        `"08/18/2026 11:59:00" "A" "Adept's Cape" "1" "4" "1"`,
+      ]),
+    );
+    expect(clustered).toHaveLength(1);
+  });
+
+  it("keeps a 15-minute gap in one run when grouping by 30 minutes", () => {
+    const clustered = clusterRowsIntoRuns(
+      rows([
+        `"08/18/2026 11:49:00" "A" "Adept's Bag" "1" "4" "1"`,
+        `"08/18/2026 12:04:00" "A" "Adept's Cape" "1" "4" "1"`,
+      ]),
+      runGapMs(30),
+    );
+    expect(clustered).toHaveLength(1);
+  });
+
+  it("starts a new run after 30 minutes when grouping by 30 minutes", () => {
+    const clustered = clusterRowsIntoRuns(
+      rows([
+        `"08/18/2026 11:49:00" "A" "Adept's Bag" "1" "4" "1"`,
+        `"08/18/2026 12:20:00" "A" "Adept's Cape" "1" "4" "1"`,
+      ]),
+      runGapMs(30),
+    );
+    expect(clustered).toHaveLength(2);
+  });
+
+  it("keeps a 45-minute gap in one run when grouping by 1 hour", () => {
+    const clustered = clusterRowsIntoRuns(
+      rows([
+        `"08/18/2026 11:49:00" "A" "Adept's Bag" "1" "4" "1"`,
+        `"08/18/2026 12:34:00" "A" "Adept's Cape" "1" "4" "1"`,
+      ]),
+      runGapMs(60),
+    );
+    expect(clustered).toHaveLength(1);
   });
 });

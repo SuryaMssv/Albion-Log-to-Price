@@ -1,9 +1,10 @@
-import { aggregateRows, parseChestLog } from "./parser";
+import { aggregateRows, clusterRowsIntoRuns, parseChestLog } from "./parser";
+import { runsFromLineGroups } from "./runs";
 import { resolveEntries } from "./resolver";
 import { fetchPrices, fetchSalesHistory, type Fetcher } from "./market";
 import { buildParticipantShares, computeSplit, priceEntries, totalValue } from "./calculator";
-import { applyDeductions, type DeductionsInput } from "./deductions";
-import type { CalculationResult, City, PriceBasis, ServerId } from "./types";
+import { computeNet, rollupRuns, type DeductionsInput } from "./deductions";
+import type { CalculationResult, City, LootRunResult, PriceBasis, ServerId } from "./types";
 import { isCity, PRICE_BASES, SERVERS } from "./types";
 
 /** Guardrails for the public endpoint (PRD §18). */
@@ -15,6 +16,11 @@ export const MAX_TAX_PERCENT = 100;
 
 export class ValidationError extends Error {}
 
+export interface RunParticipants {
+  participants: number;
+  participantNames: string[];
+}
+
 export interface CalculateInput {
   log: string;
   server: ServerId;
@@ -22,6 +28,9 @@ export interface CalculateInput {
   priceBasis: PriceBasis;
   participants: number;
   participantNames?: string[];
+  runs?: RunParticipants[];
+  /** Line numbers per run slot. When set, these groups replace timestamp clustering. */
+  runLines?: number[][];
   repairCost?: number;
   sellerTaxPercent?: number;
   guildTaxPercent?: number;
@@ -69,6 +78,8 @@ export function validateInput(body: unknown): CalculateInput {
   const sellerTaxPercent = parsePercent(raw.seller_tax, "Seller buffer tax");
   const guildTaxPercent = parsePercent(raw.guild_tax, "Guild tax");
   const premium = parsePremium(raw.premium);
+  const runs = parseRuns(raw.runs);
+  const runLines = parseRunLines(raw.run_lines);
 
   return {
     log,
@@ -77,11 +88,48 @@ export function validateInput(body: unknown): CalculateInput {
     priceBasis: priceBasis as PriceBasis,
     participants,
     participantNames,
+    runs,
+    runLines,
     repairCost,
     sellerTaxPercent,
     guildTaxPercent,
     premium,
   };
+}
+
+function parseRunLines(raw: unknown): number[][] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  return raw.map((entry, index) => {
+    if (!Array.isArray(entry)) {
+      throw new ValidationError(`Run ${index + 1} line list is invalid.`);
+    }
+    return entry.map((line) => {
+      const value = Number(line);
+      if (!Number.isInteger(value) || value < 1) {
+        throw new ValidationError(`Run ${index + 1} contains an invalid log line.`);
+      }
+      return value;
+    });
+  });
+}
+
+function parseRuns(raw: unknown): RunParticipants[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  return raw.map((entry, index) => {
+    if (typeof entry !== "object" || entry === null) {
+      throw new ValidationError(`Run ${index + 1} is invalid.`);
+    }
+    const row = entry as Record<string, unknown>;
+    const participants = Number(row.participants);
+    if (!Number.isInteger(participants) || participants < 1 || participants > MAX_PARTICIPANTS) {
+      throw new ValidationError(`Run ${index + 1} participants must be a whole number from 1 to ${MAX_PARTICIPANTS}.`);
+    }
+    const namesInput = Array.isArray(row.participant_names) ? row.participant_names : [];
+    const participantNames = namesInput
+      .slice(0, participants)
+      .map((name) => (typeof name === "string" ? name.slice(0, 40).trim() : ""));
+    return { participants, participantNames };
+  });
 }
 
 function parseWholeSilver(raw: unknown, label: string, max: number): number {
@@ -131,12 +179,25 @@ export async function calculateLootSplit(
     );
   }
 
-  const stacks = aggregateRows(parsed.rows);
-  const { resolved, unresolved } = resolveEntries(stacks);
+  const lootRuns = input.runLines
+    ? runsFromLineGroups(parsed.rows, input.runLines)
+    : clusterRowsIntoRuns(parsed.rows);
+  if (lootRuns.length === 0 || lootRuns.every((run) => run.rows.length === 0)) {
+    throw new ValidationError(
+      "Could not parse the chest log. Please make sure the copied log includes the Date, Player, Item, Enchantment, Quality, and Amount columns.",
+    );
+  }
+
+  const prepared = lootRuns.map((run) => {
+    const stacks = aggregateRows(run.rows);
+    const { resolved, unresolved } = resolveEntries(stacks);
+    return { run, stacks, resolved, unresolved };
+  });
+  const allResolved = prepared.flatMap((entry) => entry.resolved);
 
   const marketStart = Date.now();
   const lookup = await fetchPrices(
-    resolved.map((entry) => ({ itemId: entry.itemId, quality: entry.quality })),
+    allResolved.map((entry) => ({ itemId: entry.itemId, quality: entry.quality })),
     input.server,
     input.city,
     fetcher,
@@ -145,21 +206,13 @@ export async function calculateLootSplit(
   // Sales history is fetched for every stack, not just unpriced ones: it is both the
   // fallback source and the figure each listing price is corroborated against.
   const history = await fetchSalesHistory(
-    resolved.map((entry) => ({ itemId: entry.itemId, quality: entry.quality })),
+    allResolved.map((entry) => ({ itemId: entry.itemId, quality: entry.quality })),
     input.server,
     input.city,
     fetcher,
   );
   const marketMs = Date.now() - marketStart;
 
-  const { priced, missing } = priceEntries(resolved, lookup, input.city, {
-    history,
-    basis: input.priceBasis,
-  });
-  priced.sort((a, b) => b.totalValue - a.totalValue);
-
-  const total = totalValue(priced);
-  const { share, remainder } = computeSplit(total, input.participants);
   const deductions: DeductionsInput = {
     repairCost: input.repairCost ?? 0,
     sellerTaxPercent: input.sellerTaxPercent ?? 0,
@@ -167,28 +220,40 @@ export async function calculateLootSplit(
     premium: input.premium ?? true,
   };
 
-  return applyDeductions(
-    {
-      totalValue: total,
-      netValue: total,
-      repairCost: 0,
-      sellerTaxPercent: 0,
-      guildTaxPercent: 0,
-      premium: true,
-      marketSetupPercent: 2.5,
-      marketTaxPercent: 4,
-      sellerFee: 0,
-      guildFee: 0,
-      marketSetupFee: 0,
-      marketTaxFee: 0,
-      marketFee: 0,
+  const runs: LootRunResult[] = prepared.flatMap((entry, index) => {
+    if (entry.run.rows.length === 0) return [];
+    const { priced, missing } = priceEntries(entry.resolved, lookup, input.city, {
+      history,
+      basis: input.priceBasis,
+    });
+    priced.sort((a, b) => b.totalValue - a.totalValue);
+    const config = input.runs?.[index] ?? {
       participants: input.participants,
-      share,
-      remainder,
-      participantShares: buildParticipantShares(input.participants, share, input.participantNames),
-      items: priced,
-      unresolvedItems: unresolved,
-      missingPrices: missing,
+      participantNames: input.participantNames ?? [],
+    };
+    const total = totalValue(priced);
+    const breakdown = computeNet(total, deductions);
+    const { share, remainder } = computeSplit(breakdown.netValue, config.participants);
+    return [
+      {
+        index: entry.run.index,
+        startedAt: entry.run.startedAt,
+        endedAt: entry.run.endedAt,
+        totalValue: total,
+        ...breakdown,
+        participants: config.participants,
+        share,
+        remainder,
+        participantShares: buildParticipantShares(config.participants, share, config.participantNames),
+        items: priced,
+        unresolvedItems: entry.unresolved,
+        missingPrices: missing,
+      },
+    ];
+  });
+
+  return rollupRuns(
+    {
       parseErrors: parsed.errors,
       priceBasis: input.priceBasis,
       server: input.server,
@@ -196,13 +261,14 @@ export async function calculateLootSplit(
       stats: {
         rowsParsed: parsed.rows.length,
         rowsFailed: parsed.errors.length,
-        stacks: stacks.length,
-        itemsPriced: priced.length,
+        stacks: prepared.reduce((sum, entry) => sum + entry.stacks.length, 0),
+        itemsPriced: runs.reduce((sum, run) => sum + run.items.length, 0),
         calculatedAt: new Date().toISOString(),
         marketMs,
       },
       warnings: [...lookup.warnings, ...history.warnings],
     },
+    runs,
     deductions,
   );
 }

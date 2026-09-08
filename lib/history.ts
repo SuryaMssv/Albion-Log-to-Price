@@ -1,4 +1,5 @@
 import type { CalculationResult, City, ParticipantShare, PriceBasis, ServerId } from "./types";
+import type { RunGapMinutes } from "./parser";
 
 export const HISTORY_KEY = "ao-loot-split-history-v1";
 export const MAX_HISTORY = 50;
@@ -11,14 +12,23 @@ export interface HistorySnapshot {
   participantShares: ParticipantShare[];
 }
 
+export interface ChestLogRunInputs {
+  participants: string;
+  useNames: boolean;
+  names: string[];
+}
+
 export interface ChestLogHistoryInputs {
   log: string;
   server: ServerId;
   city: City;
   priceBasis: PriceBasis;
+  /** Minutes of idle time before a new run. Omitted entries default to 10. */
+  runGapMinutes?: RunGapMinutes;
   participants: string;
   useNames: boolean;
   names: string[];
+  runs?: ChestLogRunInputs[];
   repairCost: string;
   sellerTax: string;
   guildTax: string;
@@ -101,6 +111,15 @@ function isNumberRecord(value: unknown): value is Record<string, number> {
   return Object.values(value).every((item) => typeof item === "number" && Number.isFinite(item));
 }
 
+function isRunDraft(value: unknown): value is ChestLogRunInputs {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.participants === "string" &&
+    typeof value.useNames === "boolean" &&
+    isStringArray(value.names)
+  );
+}
+
 function isChestLogEntry(value: unknown): value is ChestLogHistoryEntry {
   if (!isRecord(value) || value.source !== "chest-log") return false;
   if (typeof value.id !== "string" || typeof value.savedAt !== "string") return false;
@@ -118,8 +137,14 @@ function isChestLogEntry(value: unknown): value is ChestLogHistoryEntry {
     typeof inputs.repairCost === "string" &&
     typeof inputs.sellerTax === "string" &&
     typeof inputs.guildTax === "string" &&
-    typeof inputs.premium === "boolean"
+    typeof inputs.premium === "boolean" &&
+    (inputs.runs === undefined || (Array.isArray(inputs.runs) && inputs.runs.every(isRunDraft)))
   );
+}
+
+export function runDraftsFromInputs(inputs: ChestLogHistoryInputs): ChestLogRunInputs[] {
+  if (inputs.runs && inputs.runs.length > 0) return inputs.runs;
+  return [{ participants: inputs.participants, useNames: inputs.useNames, names: inputs.names }];
 }
 
 export function isHistoryEntry(value: unknown): value is HistoryEntry {

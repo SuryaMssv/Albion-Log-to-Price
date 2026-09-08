@@ -1,6 +1,6 @@
 import { hasDeductions, type ManualSplit } from "./deductions";
-import { formatPercent, formatSilver } from "./format";
-import { PRICE_BASES, SERVERS, type CalculationResult, type ParticipantShare } from "./types";
+import { formatChestStamp, formatPercent, formatSilver } from "./format";
+import { PRICE_BASES, SERVERS, type CalculationResult, type LootRunResult, type ParticipantShare } from "./types";
 
 export interface DiscordSplitSummary {
   totalValue: number;
@@ -69,7 +69,18 @@ function buildSplitLines(result: DiscordSplitSummary): string[] {
  * is never quietly wrong.
  */
 export function buildDiscordMessage(result: CalculationResult): string {
-  const lines: string[] = ["⚔️ **GANK LOOT SPLIT**", "", ...buildSplitLines(result)];
+  const lines: string[] = ["⚔️ **GANK LOOT SPLIT**", ""];
+  const runs = result.runs ?? [];
+
+  if (runs.length > 1) {
+    lines.push(`💰 Session Gross: **${formatSilver(result.totalValue)}**`);
+    lines.push(`💰 Session Net: **${formatSilver(result.netValue)}**`, "");
+    for (const run of runs) {
+      lines.push(`**${runHeading(run)}**`, "", ...buildSplitLines(run), "");
+    }
+  } else {
+    lines.push(...buildSplitLines(result));
+  }
 
   const excluded = result.unresolvedItems.length + result.missingPrices.length;
   if (excluded > 0) {
@@ -96,6 +107,13 @@ export function buildDiscordMessage(result: CalculationResult): string {
   );
 
   return lines.join("\n");
+}
+
+export function runHeading(run: Pick<LootRunResult, "index" | "startedAt" | "endedAt">): string {
+  const start = formatChestStamp(run.startedAt);
+  const end = formatChestStamp(run.endedAt);
+  const range = start === end ? start : `${start} – ${end}`;
+  return `Run ${run.index} · ${range}`;
 }
 
 /** Split summary for typed-in totals — no market city or item notes. */

@@ -137,7 +137,6 @@ export function priceEntries(
     const quote = chooseCandidate(basis, listing, globalListings, sale, globalSales);
 
     if (!quote) {
-      // Nothing left to try: no listing here, none anywhere, and no recorded sale.
       missing.push({
         itemId: entry.itemId,
         name: entry.name,
@@ -148,6 +147,8 @@ export function priceEntries(
         reason: lookup.totalFailure
           ? "Market data was unavailable for this request."
           : `No listing and no recorded sale in any market for this item at quality ${entry.quality}.`,
+        lines: entry.lines,
+        lootDate: entry.lootDate,
       });
       continue;
     }
@@ -190,6 +191,8 @@ export function priceEntries(
           : undefined,
       globalMarkets: quote.markets,
       crossCheck,
+      lines: entry.lines,
+      lootDate: entry.lootDate,
     });
   }
 

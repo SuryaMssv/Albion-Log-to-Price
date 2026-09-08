@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useId, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 
 /** Sample from the PRD, so a first-time visitor can try the flow immediately. */
 export const SAMPLE_LOG = `"Date" "Player" "Item" "Enchantment" "Quality" "Amount"
@@ -20,9 +20,10 @@ interface LogInputProps {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  extraActions?: ReactNode;
 }
 
-export default function LogInput({ value, onChange, disabled }: LogInputProps) {
+export default function LogInput({ value, onChange, disabled, extraActions }: LogInputProps) {
   const textareaId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -63,12 +64,12 @@ export default function LogInput({ value, onChange, disabled }: LogInputProps) {
   const lineCount = value.trim() === "" ? 0 : value.trim().split(/\r?\n/).length;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <label htmlFor={textareaId} className="text-sm font-medium text-foreground">
+        <label htmlFor={textareaId} className="text-xs font-medium text-foreground">
           Paste Albion Chest Log
         </label>
-        <span className="text-xs text-muted tabular-nums">
+        <span className="text-[11px] text-muted tabular-nums">
           {lineCount} {lineCount === 1 ? "line" : "lines"}
         </span>
       </div>
@@ -85,7 +86,7 @@ export default function LogInput({ value, onChange, disabled }: LogInputProps) {
           const file = event.dataTransfer.files?.[0];
           if (file) void readFile(file);
         }}
-        className={`relative rounded-xl border-2 border-dashed transition-colors ${
+        className={`relative rounded-lg border border-dashed transition-colors ${
           dragging ? "border-gold bg-gold/5" : "border-border-soft bg-surface"
         }`}
       >
@@ -96,7 +97,7 @@ export default function LogInput({ value, onChange, disabled }: LogInputProps) {
           onChange={(event) => onChange(event.target.value)}
           spellCheck={false}
           placeholder={'Paste log here...\n\n"08/18/2026 11:49:51" "Player" "Adept\'s Bag" "1" "4" "1"'}
-          className="min-h-56 w-full resize-y rounded-xl bg-transparent p-4 font-mono text-xs leading-relaxed text-foreground outline-none placeholder:text-muted/60 focus:ring-2 focus:ring-gold/40 sm:min-h-64 sm:text-sm"
+          className="min-h-28 w-full resize-y rounded-lg bg-transparent p-2.5 font-mono text-xs leading-snug text-foreground outline-none placeholder:text-muted/60 focus:ring-2 focus:ring-gold/40 sm:min-h-32"
         />
         {dragging && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-xl bg-background/70 text-sm font-medium text-gold">
@@ -110,7 +111,7 @@ export default function LogInput({ value, onChange, disabled }: LogInputProps) {
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled}
-          className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-4 text-sm font-medium text-foreground transition-colors hover:border-gold-dim disabled:opacity-50"
+          className="min-h-8 rounded-md border border-border-soft bg-surface-raised px-3 text-xs font-medium text-foreground transition-colors hover:border-gold-dim disabled:opacity-50"
         >
           Upload file
         </button>
@@ -118,7 +119,7 @@ export default function LogInput({ value, onChange, disabled }: LogInputProps) {
           type="button"
           onClick={pasteFromClipboard}
           disabled={disabled}
-          className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-4 text-sm font-medium text-foreground transition-colors hover:border-gold-dim disabled:opacity-50"
+          className="min-h-8 rounded-md border border-border-soft bg-surface-raised px-3 text-xs font-medium text-foreground transition-colors hover:border-gold-dim disabled:opacity-50"
         >
           Paste from clipboard
         </button>
@@ -126,10 +127,11 @@ export default function LogInput({ value, onChange, disabled }: LogInputProps) {
           type="button"
           onClick={() => onChange(SAMPLE_LOG)}
           disabled={disabled}
-          className="min-h-11 rounded-lg border border-transparent px-4 text-sm font-medium text-muted transition-colors hover:text-gold disabled:opacity-50"
+          className="min-h-8 rounded-md border border-transparent px-3 text-xs font-medium text-muted transition-colors hover:text-gold disabled:opacity-50"
         >
           Load sample
         </button>
+        {extraActions}
         <input
           ref={fileInputRef}
           type="file"
@@ -144,7 +146,7 @@ export default function LogInput({ value, onChange, disabled }: LogInputProps) {
       </div>
 
       {fileError && (
-        <p role="alert" className="text-sm text-danger">
+        <p role="alert" className="text-xs text-danger">
           {fileError}
         </p>
       )}

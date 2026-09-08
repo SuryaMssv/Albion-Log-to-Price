@@ -10,9 +10,9 @@ export default function HistoryPanel() {
 
   if (entries.length === 0) {
     return (
-      <div className="rounded-2xl border border-border-soft bg-surface/60 p-6">
-        <h2 className="text-lg font-semibold text-foreground">History</h2>
-        <p className="mt-2 text-sm text-muted">
+      <div className="rounded-xl border border-border-soft bg-surface/60 p-3">
+        <h2 className="text-sm font-semibold text-foreground">History</h2>
+        <p className="mt-1 text-xs text-muted">
           Splits you calculate on this device show up here — chest logs, taxes, names, and manual
           prices. Nothing is sent to a server.
         </p>
@@ -21,11 +21,11 @@ export default function HistoryPanel() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">History</h2>
-          <p className="mt-1 text-sm text-muted">
+          <h2 className="text-sm font-semibold text-foreground">History</h2>
+          <p className="mt-0.5 text-xs text-muted">
             Saved in this browser only. Reopen to tweak taxes or copy Discord again.
           </p>
         </div>
@@ -34,13 +34,13 @@ export default function HistoryPanel() {
           onClick={() => {
             if (confirm("Clear all saved splits on this browser?")) clear();
           }}
-          className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-4 text-sm font-medium text-foreground hover:border-gold-dim"
+          className="min-h-8 rounded-md border border-border-soft bg-surface-raised px-3 text-xs font-medium text-foreground hover:border-gold-dim"
         >
           Clear all
         </button>
       </div>
 
-      <ul className="flex flex-col gap-3">
+      <ul className="flex flex-col gap-2">
         {entries.map((entry) => (
           <HistoryRow key={entry.id} entry={entry} onOpen={open} onRemove={remove} />
         ))}
@@ -64,26 +64,26 @@ function HistoryRow({
     : when.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
   return (
-    <li className="rounded-xl border border-border-soft bg-surface p-4">
+    <li className="rounded-lg border border-border-soft bg-surface p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="text-sm font-medium text-foreground">
+        <p className="text-xs font-medium text-foreground">
           {entry.source === "chest-log" ? "Chest Log" : "Calculator"} ·{" "}
           {formatCompact(entry.snapshot.totalValue)} gross
         </p>
-        <p className="text-xs text-muted">{label}</p>
+        <p className="text-[11px] text-muted">{label}</p>
       </div>
-      <p className="mt-1 text-xs text-muted">
+      <p className="mt-0.5 text-[11px] text-muted">
         {formatSilver(entry.snapshot.netValue)} net · {formatSilver(entry.snapshot.share)} each ·{" "}
         {entry.snapshot.participantShares.length} players
         {entry.source === "chest-log" && Object.keys(entry.overrides).length > 0
           ? ` · ${Object.keys(entry.overrides).length} manual price${Object.keys(entry.overrides).length === 1 ? "" : "s"}`
           : ""}
       </p>
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-2 flex flex-wrap gap-1.5">
         <button
           type="button"
           onClick={() => onOpen(entry)}
-          className="min-h-11 rounded-lg bg-gold px-4 text-sm font-semibold text-background hover:opacity-90"
+          className="min-h-8 rounded-md bg-gold px-3 text-xs font-semibold text-background hover:opacity-90"
         >
           Reopen
         </button>
@@ -92,14 +92,14 @@ function HistoryRow({
           onClick={() =>
             downloadJson(`albion-loot-${entry.savedAt.slice(0, 10)}.json`, buildExportJson(entry))
           }
-          className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-4 text-sm font-medium text-foreground hover:border-gold-dim"
+          className="min-h-8 rounded-md border border-border-soft bg-surface-raised px-3 text-xs font-medium text-foreground hover:border-gold-dim"
         >
           Export JSON
         </button>
         <button
           type="button"
           onClick={() => onRemove(entry.id)}
-          className="min-h-11 rounded-lg border border-border-soft bg-surface-raised px-4 text-sm font-medium text-foreground hover:border-gold-dim"
+          className="min-h-8 rounded-md border border-border-soft bg-surface-raised px-3 text-xs font-medium text-foreground hover:border-gold-dim"
         >
           Delete
         </button>
