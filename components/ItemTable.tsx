@@ -19,6 +19,41 @@ const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
 
 const DRAG_TYPE = "application/x-ao-stack";
 
+/** Chromium snapshots a dragged <tr> as that row plus everything below it. */
+function setRowDragImage(event: React.DragEvent<HTMLTableRowElement>) {
+  const row = event.currentTarget;
+  const rect = row.getBoundingClientRect();
+  const ghost = document.createElement("table");
+  ghost.className = "item-table";
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.style.cssText = [
+    "position:absolute",
+    "top:-1000px",
+    "left:0",
+    `width:${rect.width}px`,
+    "background:var(--surface)",
+    "color:var(--foreground)",
+    "border:1px solid var(--border)",
+    "border-radius:4px",
+    "opacity:0.92",
+    "pointer-events:none",
+    "box-shadow:0 8px 24px rgba(0,0,0,0.45)",
+  ].join(";");
+  const body = document.createElement("tbody");
+  const clone = row.cloneNode(true) as HTMLTableRowElement;
+  [...row.children].forEach((cell, index) => {
+    const cloned = clone.children[index];
+    if (cloned instanceof HTMLElement) {
+      cloned.style.width = `${cell.getBoundingClientRect().width}px`;
+    }
+  });
+  body.appendChild(clone);
+  ghost.appendChild(body);
+  document.body.appendChild(ghost);
+  event.dataTransfer.setDragImage(ghost, event.clientX - rect.left, event.clientY - rect.top);
+  window.setTimeout(() => ghost.remove(), 0);
+}
+
 interface ItemTableProps {
   items: RunTableItem[];
   overrides: Record<string, number>;
@@ -44,6 +79,7 @@ export default function ItemTable({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [maxAgeHours, setMaxAgeHours] = useState(2);
   const [dropKey, setDropKey] = useState<string | null>(null);
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
 
   const sorted = useMemo(() => {
     if (!sortKey) return items;
@@ -90,11 +126,17 @@ export default function ItemTable({
     event.preventDefault();
     event.stopPropagation();
     setDropKey(null);
+    setDraggingKey(null);
     const payload = parseDrag(event);
     if (!payload || runIndex === undefined) return;
     if (payload.runIndex === runIndex) onReorder?.(payload.key, beforeKey);
     else onMoveStack?.(payload.runIndex, payload.key, runIndex, beforeKey);
     setSortKey(null);
+  }
+
+  function clearDrag() {
+    setDropKey(null);
+    setDraggingKey(null);
   }
 
   if (items.length === 0) {
@@ -192,18 +234,28 @@ export default function ItemTable({
                     event.dataTransfer.setData(DRAG_TYPE, payload);
                     event.dataTransfer.setData("text/plain", payload);
                     event.dataTransfer.effectAllowed = "move";
+                    setRowDragImage(event);
+                    // Defer so React does not re-render the row before the drag image is taken.
+                    window.setTimeout(() => setDraggingKey(item.key), 0);
                   }}
+                  onDragEnd={clearDrag}
                   onDragOver={(event) => {
                     if (!canDrag) return;
                     event.preventDefault();
                     event.dataTransfer.dropEffect = "move";
-                    setDropKey(item.key);
+                    setDropKey((current) => (current === item.key ? current : item.key));
                   }}
-                  onDragLeave={() => setDropKey((current) => (current === item.key ? null : current))}
+                  onDragLeave={(event) => {
+                    const next = event.relatedTarget;
+                    if (next instanceof Node && event.currentTarget.contains(next)) return;
+                    setDropKey((current) => (current === item.key ? null : current));
+                  }}
                   onDrop={(event) => handleDrop(event, item.key)}
                   className={`border-b border-border-soft/60 last:border-0 ${
                     item.excluded ? "opacity-40" : ""
-                  } ${dropKey === item.key ? "bg-gold/10" : ""} ${priceIssue ? "price-issue" : ""}`}
+                  } ${draggingKey === item.key ? "dragging" : ""} ${
+                    dropKey === item.key && draggingKey !== item.key ? "drop-target" : ""
+                  } ${priceIssue ? "price-issue" : ""}`}
                 >
                   {canDrag && (
                     <td className="px-0.5 py-0 text-center text-muted">
